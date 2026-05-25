@@ -1,0 +1,62 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      mongodb:
+        image: mongo:latest
+        ports:
+          - 27017:27017
+      redis:
+        image: redis:latest
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+          cache-dependency-path: |
+            Frontend/package-lock.json
+            Backend/package-lock.json
+
+      # Build Frontend
+      - name: Install Frontend Dependencies
+        working-directory: Frontend
+        run: npm ci
+
+      - name: Build Frontend Project
+        working-directory: Frontend
+        run: npm run build
+
+      # Build & Test Backend
+      - name: Install Backend Dependencies
+        working-directory: Backend
+        run: npm ci
+
+      - name: Verify Backend Server & Health Check
+        working-directory: Backend
+        env:
+          MONGO_URI: mongodb://localhost:27017/taxi-pooling
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: supersecretjwtkeyforgithubactions123!
+          PORT: 5001
+        run: |
+          npm start &
+          # Give server 5 seconds to boot up
+          sleep 5
+          # Test health check endpoint
+          curl -f http://localhost:5001/api/health || exit 1
