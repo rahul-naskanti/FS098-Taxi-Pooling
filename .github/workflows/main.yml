@@ -59,4 +59,4 @@ jobs:
           # Give server 5 seconds to boot up
           sleep 5
           # Test health check endpoint
-          curl -f http://localhost:5001/api/health || exit 1
+          curl -f https://fs098-taxi-pooling.onrender.com/api/health || exit 1
