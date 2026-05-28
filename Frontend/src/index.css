@@ -3,7 +3,7 @@
 @theme {
   --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
   --font-display: 'Outfit', system-ui, sans-serif;
-  
+
   --color-primary-50: #ecfdf5;
   --color-primary-100: #d1fae5;
   --color-primary-200: #a7f3d0;
@@ -15,7 +15,7 @@
   --color-primary-800: #065f46;
   --color-primary-900: #064e3b;
   --color-primary-950: #022c22;
-  
+
   --color-dark-50: #f8fafc;
   --color-dark-100: #f1f5f9;
   --color-dark-200: #e2e8f0;
@@ -33,13 +33,16 @@
 ::-webkit-scrollbar {
   width: 8px;
 }
+
 ::-webkit-scrollbar-track {
   background: #090d16;
 }
+
 ::-webkit-scrollbar-thumb {
   background: #1e293b;
   border-radius: 4px;
 }
+
 ::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
@@ -52,6 +55,11 @@ body {
   font-family: var(--font-sans);
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   font-family: var(--font-display);
 }

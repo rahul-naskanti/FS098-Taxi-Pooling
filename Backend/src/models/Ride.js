@@ -19,8 +19,7 @@ const rideSchema = new mongoose.Schema(
     },
     departureDate: {
       type: String,
-      required: [true, 'Departure date is required'],
-      index: true
+      required: [true, 'Departure date is required']
     },
     departureTime: {
       type: String,
