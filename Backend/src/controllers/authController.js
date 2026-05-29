@@ -46,6 +46,18 @@ const registerUser = async (req, res) => {
       throw new Error('Drivers must provide vehicle spec details, license number, and available seat counts');
     }
 
+    // Extract file uploads
+    const licenseImageFile = req.files && req.files['licenseImage'] ? req.files['licenseImage'][0] : null;
+    const rcDocumentFile = req.files && req.files['rcDocument'] ? req.files['rcDocument'][0] : null;
+
+    if (!licenseImageFile) {
+      res.status(400);
+      throw new Error('Drivers must upload a driving license image');
+    }
+
+    const licenseImagePath = `uploads/${licenseImageFile.filename}`;
+    const rcDocumentPath = rcDocumentFile ? `uploads/${rcDocumentFile.filename}` : '';
+
     // Create new driver in Driver collection
     const driver = await Driver.create({
       fullName,
@@ -55,7 +67,12 @@ const registerUser = async (req, res) => {
       vehicleName,
       vehicleNumber,
       licenseNumber,
-      availableSeats: parseInt(availableSeats, 10) || 0
+      availableSeats: parseInt(availableSeats, 10) || 0,
+      uploadedDocuments: {
+        licenseImage: licenseImagePath,
+        rcDocument: rcDocumentPath,
+        idProof: ''
+      }
     });
 
     if (driver) {
@@ -71,7 +88,8 @@ const registerUser = async (req, res) => {
           vehicleName: driver.vehicleName,
           vehicleNumber: driver.vehicleNumber,
           licenseNumber: driver.licenseNumber,
-          availableSeats: driver.availableSeats
+          availableSeats: driver.availableSeats,
+          uploadedDocuments: driver.uploadedDocuments
         }
       });
     } else {

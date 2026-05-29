@@ -94,9 +94,24 @@ function AdminVerifications() {
 
   const getDocUrl = (docName, driver) => {
     if (driver?.uploadedDocuments?.[docName]) {
-      return driver.uploadedDocuments[docName];
+      const docPath = driver.uploadedDocuments[docName];
+      if (docPath.startsWith('/uploads') || docPath.startsWith('uploads')) {
+        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+        const serverUrl = isLocal ? 'http://localhost:5001' : 'https://fs098-taxi-pooling.onrender.com';
+        const cleanPath = docPath.startsWith('/') ? docPath : `/${docPath}`;
+        return `${serverUrl}${cleanPath}`;
+      }
+      return docPath;
+    }
+    if (docName === 'rcDocument' && driver && 'uploadedDocuments' in driver) {
+      return null;
     }
     return MOCK_DOCS[docName];
+  };
+
+  const isPdfDoc = (docName, driver) => {
+    const url = getDocUrl(docName, driver);
+    return url && url.toLowerCase().endsWith('.pdf');
   };
 
   return (
@@ -262,11 +277,18 @@ function AdminVerifications() {
                   {/* License Image */}
                   <div className="bg-[#070a13] border border-slate-900 rounded-2xl overflow-hidden group relative">
                     <div className="h-28 bg-slate-950 flex items-center justify-center overflow-hidden">
-                      <img 
-                        src={getDocUrl('licenseImage', selectedDriver)} 
-                        alt="License Document" 
-                        className="object-cover w-full h-full opacity-60 group-hover:scale-105 transition-all duration-300"
-                      />
+                      {isPdfDoc('licenseImage', selectedDriver) ? (
+                        <div className="flex flex-col items-center gap-1.5 text-slate-400">
+                          <FaRegFileAlt className="text-3xl text-red-400" />
+                          <span className="text-[10px] font-medium">PDF Document</span>
+                        </div>
+                      ) : (
+                        <img 
+                          src={getDocUrl('licenseImage', selectedDriver)} 
+                          alt="License Document" 
+                          className="object-cover w-full h-full opacity-60 group-hover:scale-105 transition-all duration-300"
+                        />
+                      )}
                     </div>
                     <div className="p-3 flex items-center justify-between border-t border-slate-900 bg-slate-950/40">
                       <span className="text-[10px] text-slate-400 font-bold">Driver License</span>
@@ -283,32 +305,53 @@ function AdminVerifications() {
                   {/* RC Document */}
                   <div className="bg-[#070a13] border border-slate-900 rounded-2xl overflow-hidden group relative">
                     <div className="h-28 bg-slate-950 flex items-center justify-center overflow-hidden">
-                      <img 
-                        src={getDocUrl('rcDocument', selectedDriver)} 
-                        alt="RC Certificate" 
-                        className="object-cover w-full h-full opacity-60 group-hover:scale-105 transition-all duration-300"
-                      />
+                      {!getDocUrl('rcDocument', selectedDriver) ? (
+                        <div className="flex flex-col items-center gap-1 text-slate-500">
+                          <FaRegFileAlt className="text-2xl text-slate-600 animate-pulse" />
+                          <span className="text-[10px] font-medium">Not Uploaded</span>
+                        </div>
+                      ) : isPdfDoc('rcDocument', selectedDriver) ? (
+                        <div className="flex flex-col items-center gap-1.5 text-slate-400">
+                          <FaRegFileAlt className="text-3xl text-red-400" />
+                          <span className="text-[10px] font-medium">PDF Document</span>
+                        </div>
+                      ) : (
+                        <img 
+                          src={getDocUrl('rcDocument', selectedDriver)} 
+                          alt="RC Certificate" 
+                          className="object-cover w-full h-full opacity-60 group-hover:scale-105 transition-all duration-300"
+                        />
+                      )}
                     </div>
                     <div className="p-3 flex items-center justify-between border-t border-slate-900 bg-slate-950/40">
                       <span className="text-[10px] text-slate-400 font-bold">Vehicle RC</span>
-                      <button 
-                        onClick={() => setSelectedDocUrl(getDocUrl('rcDocument', selectedDriver))}
-                        className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-400 text-xs border border-slate-800 cursor-pointer"
-                        title="View Document"
-                      >
-                        <FaEye />
-                      </button>
+                      {getDocUrl('rcDocument', selectedDriver) && (
+                        <button 
+                          onClick={() => setSelectedDocUrl(getDocUrl('rcDocument', selectedDriver))}
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-400 text-xs border border-slate-800 cursor-pointer"
+                          title="View Document"
+                        >
+                          <FaEye />
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   {/* ID Proof */}
                   <div className="bg-[#070a13] border border-slate-900 rounded-2xl overflow-hidden group relative">
                     <div className="h-28 bg-slate-950 flex items-center justify-center overflow-hidden">
-                      <img 
-                        src={getDocUrl('idProof', selectedDriver)} 
-                        alt="ID Card Proof" 
-                        className="object-cover w-full h-full opacity-60 group-hover:scale-105 transition-all duration-300"
-                      />
+                      {isPdfDoc('idProof', selectedDriver) ? (
+                        <div className="flex flex-col items-center gap-1.5 text-slate-400">
+                          <FaRegFileAlt className="text-3xl text-red-400" />
+                          <span className="text-[10px] font-medium">PDF Document</span>
+                        </div>
+                      ) : (
+                        <img 
+                          src={getDocUrl('idProof', selectedDriver)} 
+                          alt="ID Card Proof" 
+                          className="object-cover w-full h-full opacity-60 group-hover:scale-105 transition-all duration-300"
+                        />
+                      )}
                     </div>
                     <div className="p-3 flex items-center justify-between border-t border-slate-900 bg-slate-950/40">
                       <span className="text-[10px] text-slate-400 font-bold">National ID Proof</span>
@@ -409,11 +452,19 @@ function AdminVerifications() {
               <p className="text-xs font-bold text-white">Vetting Document Preview</p>
             </div>
             <div className="p-6 bg-slate-950 flex items-center justify-center max-h-[70vh]">
-              <img 
-                src={selectedDocUrl} 
-                alt="Document Verification Preview" 
-                className="object-contain max-h-[60vh] max-w-full rounded-lg"
-              />
+              {selectedDocUrl.toLowerCase().endsWith('.pdf') ? (
+                <iframe 
+                  src={selectedDocUrl} 
+                  title="Document Verification Preview" 
+                  className="w-full h-[60vh] rounded-lg border border-slate-800 bg-slate-900"
+                />
+              ) : (
+                <img 
+                  src={selectedDocUrl} 
+                  alt="Document Verification Preview" 
+                  className="object-contain max-h-[60vh] max-w-full rounded-lg"
+                />
+              )}
             </div>
           </div>
         </div>

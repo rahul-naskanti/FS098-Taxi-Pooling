@@ -31,6 +31,9 @@ app.use(cors());
 app.use(express.json());
 app.use(mongoSanitize());
 
+// Serve static uploads
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Health Check Endpoint (pre-rate limiting for monitoring stability)
 app.get('/api/health', (req, res) => {
   const mongooseState = mongoose.connection.readyState;

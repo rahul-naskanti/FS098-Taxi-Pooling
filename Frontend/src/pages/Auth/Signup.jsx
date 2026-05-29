@@ -23,6 +23,8 @@ function Signup() {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState('');
+  const [licenseImage, setLicenseImage] = useState(null);
+  const [rcDocument, setRcDocument] = useState(null);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -81,6 +83,7 @@ function Signup() {
       if (!formData.vehicleName.trim()) tempErrors.vehicleName = "Vehicle Name is required";
       if (!formData.vehicleNumber.trim()) tempErrors.vehicleNumber = "Vehicle Number is required";
       if (!formData.licenseNumber.trim()) tempErrors.licenseNumber = "License Number is required";
+      if (!licenseImage) tempErrors.licenseImage = "Driving License attachment is required";
 
       const seats = parseInt(formData.availableSeats, 10);
       if (!formData.availableSeats) {
@@ -101,19 +104,33 @@ function Signup() {
     setIsLoading(true);
     setServerError('');
 
-    const payload = {
-      fullName: formData.fullName,
-      email: formData.email,
-      phone: formData.phoneNumber,
-      password: formData.password,
-      role: formData.role
-    };
-
+    let payload;
     if (formData.role === 'driver') {
-      payload.vehicleName = formData.vehicleName;
-      payload.vehicleNumber = formData.vehicleNumber;
-      payload.licenseNumber = formData.licenseNumber;
-      payload.availableSeats = parseInt(formData.availableSeats, 10);
+      payload = new FormData();
+      payload.append('fullName', formData.fullName);
+      payload.append('email', formData.email);
+      payload.append('phone', formData.phoneNumber);
+      payload.append('password', formData.password);
+      payload.append('role', formData.role);
+      payload.append('vehicleName', formData.vehicleName);
+      payload.append('vehicleNumber', formData.vehicleNumber);
+      payload.append('licenseNumber', formData.licenseNumber);
+      payload.append('availableSeats', parseInt(formData.availableSeats, 10));
+      
+      if (licenseImage) {
+        payload.append('licenseImage', licenseImage);
+      }
+      if (rcDocument) {
+        payload.append('rcDocument', rcDocument);
+      }
+    } else {
+      payload = {
+        fullName: formData.fullName,
+        email: formData.email,
+        phone: formData.phoneNumber,
+        password: formData.password,
+        role: formData.role
+      };
     }
 
     try {
@@ -393,6 +410,68 @@ function Signup() {
                     />
                   </div>
                   {errors.availableSeats && <p className="text-red-400 text-xs mt-1">{errors.availableSeats}</p>}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Driving License Image Upload */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Driving License (Required)</label>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      name="licenseImage"
+                      id="licenseImage"
+                      accept=".jpg,.jpeg,.png,.pdf"
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        setLicenseImage(file);
+                        if (errors.licenseImage) {
+                          setErrors({ ...errors, licenseImage: '' });
+                        }
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="licenseImage"
+                      className={`w-full py-3 px-4 bg-slate-950 border rounded-xl text-xs font-medium cursor-pointer flex items-center justify-between transition-all ${
+                        errors.licenseImage ? 'border-red-500/50 hover:border-red-500 text-red-400' : 'border-slate-800 hover:border-emerald-500/50 text-slate-350'
+                      }`}
+                    >
+                      <span className="truncate max-w-[150px]">
+                        {licenseImage ? licenseImage.name : 'Choose License File'}
+                      </span>
+                      <span className="text-[10px] bg-slate-900 border border-slate-800 text-slate-400 py-1 px-2 rounded-lg">Browse</span>
+                    </label>
+                  </div>
+                  {errors.licenseImage && <p className="text-red-400 text-xs mt-1">{errors.licenseImage}</p>}
+                </div>
+
+                {/* Vehicle RC Document Upload */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Vehicle RC (Optional)</label>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      name="rcDocument"
+                      id="rcDocument"
+                      accept=".jpg,.jpeg,.png,.pdf"
+                      onChange={(e) => {
+                        const file = e.target.files[0];
+                        setRcDocument(file);
+                      }}
+                      className="hidden"
+                    />
+                    <label
+                      htmlFor="rcDocument"
+                      className="w-full py-3 px-4 bg-slate-950 border border-slate-800 hover:border-emerald-500/50 rounded-xl text-xs font-medium cursor-pointer flex items-center justify-between text-slate-350 transition-all"
+                    >
+                      <span className="truncate max-w-[150px]">
+                        {rcDocument ? rcDocument.name : 'Choose RC File'}
+                      </span>
+                      <span className="text-[10px] bg-slate-900 border border-slate-800 text-slate-400 py-1 px-2 rounded-lg">Browse</span>
+                    </label>
+                  </div>
                 </div>
               </div>
             </div>
