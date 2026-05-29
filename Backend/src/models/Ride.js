@@ -56,12 +56,69 @@ const rideSchema = new mongoose.Schema(
       type: String,
       enum: ['active', 'completed', 'cancelled'],
       default: 'active'
+    },
+    farePerSeat: {
+      type: Number,
+      min: [0, 'Price per seat cannot be negative']
+    },
+    remainingSeats: {
+      type: Number,
+      min: [0, 'Remaining seats cannot be negative']
+    },
+    driverRating: {
+      type: Number,
+      default: 4.8
+    },
+    vehicleNumber: {
+      type: String,
+      trim: true
+    },
+    rideDistance: {
+      type: Number,
+      default: 0
+    },
+    rideDuration: {
+      type: Number,
+      default: 0
+    },
+    instantBooking: {
+      type: Boolean,
+      default: false
+    },
+    femaleFriendly: {
+      type: Boolean,
+      default: false
+    },
+    isVerifiedDriver: {
+      type: Boolean,
+      default: false
+    },
+    acService: {
+      type: Boolean,
+      default: true
     }
   },
   {
     timestamps: true
   }
 );
+
+// Pre-save hook to sync legacy fields
+rideSchema.pre('save', function (next) {
+  if (this.pricePerSeat !== undefined && this.farePerSeat === undefined) {
+    this.farePerSeat = this.pricePerSeat;
+  }
+  if (this.pricePerSeat === undefined && this.farePerSeat !== undefined) {
+    this.pricePerSeat = this.farePerSeat;
+  }
+  if (this.availableSeats !== undefined && this.remainingSeats === undefined) {
+    this.remainingSeats = this.availableSeats;
+  }
+  if (this.availableSeats === undefined && this.remainingSeats !== undefined) {
+    this.availableSeats = this.remainingSeats;
+  }
+  next();
+});
 
 // Create compound index for date and time search optimization
 rideSchema.index({ departureDate: 1, departureTime: 1 });

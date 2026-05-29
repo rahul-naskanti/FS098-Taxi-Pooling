@@ -70,6 +70,7 @@ app.use('/api/rides', require('./routes/rideRoutes'));
 app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
 app.use('/api/admin', require('./routes/adminRoutes'));
+app.use('/api', require('./routes/passengerRoutes'));
 
 // Base route fallback
 app.get('/', (req, res) => {

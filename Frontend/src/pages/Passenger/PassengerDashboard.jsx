@@ -285,12 +285,8 @@ function PassengerDashboard() {
 
       {activeTab === 'findRides' && (
         <FindRides
-          searchPickup={searchPickup}
-          setSearchPickup={setSearchPickup}
-          searchDropoff={searchDropoff}
-          setSearchDropoff={setSearchDropoff}
-          filteredRides={filteredRides}
           handleJoinRide={handleJoinRide}
+          onBookingSuccess={refreshData}
         />
       )}
 

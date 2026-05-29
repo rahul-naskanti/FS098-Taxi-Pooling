@@ -485,6 +485,326 @@ const removePassenger = async (req, res) => {
   });
 };
 
+// @desc    Search active ride pools with filters
+// @route   GET /api/rides/search
+// @access  Private
+const searchRides = async (req, res) => {
+  const {
+    pickup,
+    drop,
+    date,
+    passengers = 1,
+    minPrice,
+    maxPrice,
+    vehicleType,
+    rating,
+    verifiedOnly,
+    instantOnly,
+    femaleFriendlyOnly,
+    acFilter,
+    timeRange
+  } = req.query;
+
+  const filter = { status: 'active' };
+
+  if (pickup) {
+    filter.pickupLocation = { $regex: pickup, $options: 'i' };
+  }
+  if (drop) {
+    filter.dropLocation = { $regex: drop, $options: 'i' };
+  }
+  if (date) {
+    filter.departureDate = date;
+  }
+
+  const requiredSeats = Number(passengers) || 1;
+  filter.$or = [
+    { remainingSeats: { $gte: requiredSeats } },
+    { remainingSeats: { $exists: false }, availableSeats: { $gte: requiredSeats } }
+  ];
+
+  if (minPrice || maxPrice) {
+    const priceQuery = {};
+    if (minPrice) priceQuery.$gte = Number(minPrice);
+    if (maxPrice) priceQuery.$lte = Number(maxPrice);
+    
+    filter.$and = filter.$and || [];
+    filter.$and.push({
+      $or: [
+        { farePerSeat: priceQuery },
+        { farePerSeat: { $exists: false }, pricePerSeat: priceQuery }
+      ]
+    });
+  }
+
+  if (vehicleType) {
+    const types = Array.isArray(vehicleType) ? vehicleType : vehicleType.split(',');
+    filter.vehicleType = { $in: types.map(t => new RegExp(`^${t.trim()}$`, 'i')) };
+  }
+
+  if (rating) {
+    filter.driverRating = { $gte: Number(rating) };
+  }
+
+  if (verifiedOnly === 'true') {
+    filter.isVerifiedDriver = true;
+  }
+
+  if (instantOnly === 'true') {
+    filter.instantBooking = true;
+  }
+
+  if (femaleFriendlyOnly === 'true') {
+    filter.femaleFriendly = true;
+  }
+
+  if (acFilter) {
+    filter.acService = acFilter === 'ac';
+  }
+
+  let rides = await Ride.find(filter)
+    .populate('driver', 'fullName phone vehicleName vehicleNumber isVerified')
+    .sort({ departureTime: 1 })
+    .lean();
+
+  const timeToMinutes = (timeStr) => {
+    if (!timeStr) return 0;
+    const clean = timeStr.trim().toUpperCase();
+    const match = clean.match(/^(\d+):(\d+)\s*(AM|PM)?$/);
+    if (!match) return 0;
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const meridian = match[3];
+    
+    if (meridian === 'PM' && hours < 12) hours += 12;
+    if (meridian === 'AM' && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+  };
+
+  if (timeRange) {
+    const ranges = Array.isArray(timeRange) ? timeRange : timeRange.split(',');
+    rides = rides.filter(ride => {
+      const minutes = timeToMinutes(ride.departureTime);
+      return ranges.some(range => {
+        if (range === 'morning') return minutes >= 360 && minutes < 720;
+        if (range === 'afternoon') return minutes >= 720 && minutes < 1080;
+        if (range === 'evening') return minutes >= 1080 && minutes < 1440;
+        if (range === 'night') return minutes >= 0 && minutes < 360;
+        return true;
+      });
+    });
+  }
+
+  if (req.user && req.user.role === 'passenger' && pickup && drop) {
+    await User.findByIdAndUpdate(req.user.id, {
+      $push: {
+        recentSearches: {
+          $each: [{
+            pickup,
+            dropoff: drop,
+            date: date || '',
+            passengers: requiredSeats,
+            searchedAt: new Date()
+          }],
+          $slice: -5
+        }
+      }
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    rides
+  });
+};
+
+// @desc    Get single ride by ID with driver info
+// @route   GET /api/rides/:id
+// @access  Private
+const getRideById = async (req, res) => {
+  const ride = await Ride.findById(req.params.id)
+    .populate('driver', 'fullName email phone vehicleName vehicleNumber verificationStatus isVerified')
+    .lean();
+
+  if (!ride) {
+    res.status(404);
+    throw new Error('Ride pool not found');
+  }
+
+  res.status(200).json({
+    success: true,
+    ride
+  });
+};
+
+// @desc    Create a ride booking with seat customization
+// @route   POST /api/bookings
+// @access  Private (Passenger only)
+const createBooking = async (req, res) => {
+  const { rideId, seatsBooked, totalFare } = req.body;
+  const seats = Number(seatsBooked) || 1;
+
+  const existingRide = await Ride.findById(rideId);
+  if (!existingRide) {
+    res.status(404);
+    throw new Error('Ride pool not found');
+  }
+
+  if (existingRide.driver.toString() === req.user.id) {
+    res.status(400);
+    throw new Error('Drivers cannot book their own ride pools');
+  }
+
+  const currentSeats = existingRide.remainingSeats !== undefined ? existingRide.remainingSeats : existingRide.availableSeats;
+  if (currentSeats < seats) {
+    res.status(400);
+    throw new Error('Not enough seats available on this ride');
+  }
+
+  const updatedRide = await Ride.findOneAndUpdate(
+    {
+      _id: rideId,
+      availableSeats: { $gte: seats },
+      status: 'active'
+    },
+    {
+      $inc: { availableSeats: -seats, remainingSeats: -seats },
+      $push: { passengers: req.user.id }
+    },
+    { new: true }
+  );
+
+  if (!updatedRide) {
+    res.status(400);
+    throw new Error('Failed to book ride. Available seats might have changed.');
+  }
+
+  const booking = await Booking.create({
+    ride: rideId,
+    passenger: req.user.id,
+    driver: existingRide.driver,
+    seatsBooked: seats,
+    totalFare: totalFare || (existingRide.pricePerSeat * seats),
+    bookingStatus: 'active',
+    paymentStatus: 'paid'
+  });
+
+  const transactionId = `TXN-${new mongoose.Types.ObjectId().toString().toUpperCase()}`;
+  await Payment.create({
+    booking: booking._id,
+    passenger: req.user.id,
+    driver: existingRide.driver,
+    amount: totalFare || (existingRide.pricePerSeat * seats),
+    paymentMethod: 'wallet',
+    paymentStatus: 'completed',
+    transactionId
+  });
+
+  await Notification.create({
+    user: req.user.id,
+    userModel: 'User',
+    title: 'Ride Booked Successfully',
+    message: `Booked ${seats} seats from ${existingRide.pickupLocation} to ${existingRide.dropLocation}.`,
+    type: 'join'
+  });
+
+  await Notification.create({
+    user: existingRide.driver,
+    userModel: 'Driver',
+    title: 'New Ride Booking',
+    message: `A passenger has booked ${seats} seats on your ride from ${existingRide.pickupLocation} to ${existingRide.dropLocation}.`,
+    type: 'join'
+  });
+
+  await delCache('active_rides_list');
+  await delCache('admin_dashboard_stats');
+  await delCache(`passenger_dashboard_stats:${req.user.id}`);
+  await delCache(`driver_dashboard_stats:${existingRide.driver}`);
+
+  res.status(201).json({
+    success: true,
+    message: 'Ride booked successfully',
+    booking,
+    ride: updatedRide
+  });
+};
+
+// @desc    Bookmark or save a ride for later
+// @route   POST /api/rides/save
+// @access  Private (Passenger only)
+const saveRide = async (req, res) => {
+  const { rideId } = req.body;
+
+  const user = await User.findById(req.user.id);
+  if (!user) {
+    res.status(404);
+    throw new Error('User account not found');
+  }
+
+  const rideExists = await Ride.findById(rideId);
+  if (!rideExists) {
+    res.status(404);
+    throw new Error('Ride pool not found');
+  }
+
+  const alreadySaved = user.savedRides.some(id => id.toString() === rideId);
+  if (alreadySaved) {
+    user.savedRides = user.savedRides.filter(id => id.toString() !== rideId);
+    await user.save();
+    return res.status(200).json({
+      success: true,
+      isSaved: false,
+      message: 'Ride removed from saved list'
+    });
+  } else {
+    user.savedRides.push(rideId);
+    await user.save();
+    return res.status(200).json({
+      success: true,
+      isSaved: true,
+      message: 'Ride saved successfully'
+    });
+  }
+};
+
+// @desc    Get saved rides list
+// @route   GET /api/passenger/saved-rides
+// @access  Private (Passenger only)
+const getSavedRides = async (req, res) => {
+  const user = await User.findById(req.user.id)
+    .populate({
+      path: 'savedRides',
+      populate: { path: 'driver', select: 'fullName phone vehicleName vehicleNumber verificationStatus isVerified' }
+    })
+    .lean();
+
+  if (!user) {
+    res.status(404);
+    throw new Error('User account not found');
+  }
+
+  res.status(200).json({
+    success: true,
+    savedRides: user.savedRides || []
+  });
+};
+
+// @desc    Get user's recent searches
+// @route   GET /api/passenger/recent-searches
+// @access  Private (Passenger only)
+const getRecentSearches = async (req, res) => {
+  const user = await User.findById(req.user.id).select('recentSearches').lean();
+  if (!user) {
+    res.status(404);
+    throw new Error('User account not found');
+  }
+
+  res.status(200).json({
+    success: true,
+    recentSearches: user.recentSearches || []
+  });
+};
+
 module.exports = {
   createRide,
   getAllRides,
@@ -493,5 +813,11 @@ module.exports = {
   getPassengerBookings,
   cancelRide,
   leaveRide,
-  removePassenger
+  removePassenger,
+  searchRides,
+  getRideById,
+  createBooking,
+  saveRide,
+  getSavedRides,
+  getRecentSearches
 };

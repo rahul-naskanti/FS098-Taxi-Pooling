@@ -42,7 +42,22 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true
-    }
+    },
+    savedRides: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Ride'
+      }
+    ],
+    recentSearches: [
+      {
+        pickup: { type: String, required: true },
+        dropoff: { type: String, required: true },
+        date: { type: String },
+        passengers: { type: Number, default: 1 },
+        searchedAt: { type: Date, default: Date.now }
+      }
+    ]
   },
   {
     timestamps: true

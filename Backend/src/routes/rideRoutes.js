@@ -8,11 +8,24 @@ const {
   getPassengerBookings,
   cancelRide,
   leaveRide,
-  removePassenger
+  removePassenger,
+  searchRides,
+  getRideById,
+  saveRide
 } = require('../controllers/rideController');
 const { protect, authorizeRoles } = require('../middleware/authMiddleware');
 
 // NOTE: Non-parameterized routes registered FIRST to prevent route parameter collision (Express matches top-to-bottom)
+
+// @route   GET /api/rides/search
+// @desc    Search active ride pools with filters
+// @access  Private
+router.get('/search', protect, searchRides);
+
+// @route   POST /api/rides/save
+// @desc    Bookmark or save a ride
+// @access  Private (Passenger only)
+router.post('/save', protect, authorizeRoles('passenger'), saveRide);
 
 // @route   GET /api/rides/driver/my-rides
 // @desc    Get rides created by the logged-in driver
@@ -53,5 +66,10 @@ router.post('/:id/leave', protect, authorizeRoles('passenger'), leaveRide);
 // @desc    Cancel a ride pool
 // @access  Private (Driver only)
 router.patch('/:id/cancel', protect, authorizeRoles('driver'), cancelRide);
+
+// @route   GET /api/rides/:id
+// @desc    Get single ride pool by ID
+// @access  Private
+router.get('/:id', protect, getRideById);
 
 module.exports = router;
