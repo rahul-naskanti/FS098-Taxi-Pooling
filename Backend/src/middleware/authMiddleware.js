@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Driver = require('../models/Driver');
+const AppError = require('../utils/AppError');
 
 const protect = async (req, res, next) => {
   let token;
@@ -10,64 +11,93 @@ const protect = async (req, res, next) => {
     req.headers.authorization.startsWith('Bearer')
   ) {
     try {
-      // Get token from header
       token = req.headers.authorization.split(' ')[1];
+      const secret = process.env.JWT_SECRET || 'supersecretjwtkeyfordev123!';
+      const decoded = jwt.verify(token, secret);
 
-      // Verify token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-      // Handle hardcoded admin case
-      if (decoded.id === 'admin-static-id' || decoded.role === 'admin') {
-        req.user = {
-          _id: 'admin-static-id',
-          id: 'admin-static-id',
-          fullName: 'Platform Admin',
-          email: 'admin@taxipool.com',
-          role: 'admin',
-          isActive: true
-        };
-      } else if (decoded.role === 'driver') {
-        // Query Driver collection
+      if (decoded.role === 'driver') {
         req.user = await Driver.findById(decoded.id).select('-password');
-      } else if (decoded.role === 'passenger') {
-        // Query Passenger (User) collection
-        req.user = await User.findById(decoded.id).select('-password');
       } else {
-        // Fallback for legacy tokens without embedded role payload
-        let foundUser = await User.findById(decoded.id).select('-password');
-        if (!foundUser) {
-          foundUser = await Driver.findById(decoded.id).select('-password');
+        // Query User collection (passengers and admins)
+        req.user = await User.findById(decoded.id).select('-password');
+        if (!req.user && !decoded.role) {
+          // Fallback check in Driver collection for legacy tokens
+          req.user = await Driver.findById(decoded.id).select('-password');
         }
-        req.user = foundUser;
       }
 
       if (!req.user) {
-        res.status(401);
-        throw new Error('Not authorized, user not found');
+        throw new AppError('Not authorized, user account not found', 401);
+      }
+
+      if (req.user.isActive === false) {
+        throw new AppError('User account is deactivated. Please contact support.', 403);
       }
 
       next();
     } catch (error) {
-      console.error('JWT Verification Error:', error.message);
-      res.status(401);
-      throw new Error('Not authorized, token failed');
+      if (error instanceof AppError) throw error;
+      if (error.name === 'TokenExpiredError') {
+        throw new AppError('Access token expired. Please refresh your session.', 401);
+      }
+      throw new AppError('Not authorized, token failed', 401);
     }
   }
 
   if (!token) {
-    res.status(401);
-    throw new Error('Not authorized, no token');
+    throw new AppError('Not authorized, no token provided', 401);
   }
 };
 
 const authorizeRoles = (...roles) => {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
-      res.status(403);
-      throw new Error(`Role (${req.user ? req.user.role : 'none'}) is not authorized to access this resource`);
+      throw new AppError(
+        `Role (${req.user ? req.user.role : 'none'}) is not authorized to access this resource`,
+        403
+      );
     }
     next();
   };
 };
 
-module.exports = { protect, authorizeRoles };
+// Enforces driver verification check before performing driver actions (e.g. creating ride pools)
+const requireVerifiedDriver = (req, res, next) => {
+  if (!req.user || req.user.role !== 'driver') {
+    throw new AppError('Access denied: Driver privileges required', 403);
+  }
+
+  const isVerified = req.user.isVerified || req.user.verificationStatus === 'verified';
+  if (!isVerified) {
+    throw new AppError('Driver account is pending verification by an administrator', 403);
+  }
+
+  next();
+};
+
+// Prevents IDOR vulnerabilities by asserting resource owner or admin access
+const authorizeOwnerOrAdmin = (paramName = 'id') => {
+  return (req, res, next) => {
+    const resourceUserId = req.params[paramName];
+    if (!req.user) {
+      throw new AppError('Not authorized', 401);
+    }
+
+    if (req.user.role === 'admin') {
+      return next(); // Admins have full access
+    }
+
+    if (req.user._id.toString() !== resourceUserId && req.user.id !== resourceUserId) {
+      throw new AppError('Forbidden: You do not have permission to access another user\'s resource', 403);
+    }
+
+    next();
+  };
+};
+
+module.exports = {
+  protect,
+  authorizeRoles,
+  requireVerifiedDriver,
+  authorizeOwnerOrAdmin
+};

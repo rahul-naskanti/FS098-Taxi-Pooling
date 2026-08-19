@@ -13,7 +13,8 @@ const {
   getRideById,
   saveRide
 } = require('../controllers/rideController');
-const { protect, authorizeRoles } = require('../middleware/authMiddleware');
+const { protect, authorizeRoles, requireVerifiedDriver } = require('../middleware/authMiddleware');
+const { validateCreateRide } = require('../middleware/validateMiddleware');
 
 // NOTE: Non-parameterized routes registered FIRST to prevent route parameter collision (Express matches top-to-bottom)
 
@@ -39,8 +40,8 @@ router.get('/passenger/bookings', protect, authorizeRoles('passenger'), getPasse
 
 // @route   POST /api/rides
 // @desc    Create a new ride pool
-// @access  Private (Driver only)
-router.post('/', protect, authorizeRoles('driver'), createRide);
+// @access  Private (Verified Driver only)
+router.post('/', protect, authorizeRoles('driver'), requireVerifiedDriver, validateCreateRide, createRide);
 
 // @route   GET /api/rides
 // @desc    Get all active ride pools

@@ -1,6 +1,47 @@
 const User = require('../models/User');
 const Driver = require('../models/Driver');
-const generateToken = require('../utils/generateToken');
+const {
+  generateAccessToken,
+  generateRefreshToken,
+  verifyRefreshToken,
+  getCookieOptions
+} = require('../utils/generateToken');
+const AppError = require('../utils/AppError');
+
+// Helper to issue tokens and set HTTP-only cookie
+const sendAuthResponse = (res, statusCode, userRecord, role) => {
+  const userId = userRecord._id || userRecord.id;
+  const accessToken = generateAccessToken(userId, role);
+  const refreshToken = generateRefreshToken(userId, role);
+
+  // Set Refresh Token in HTTP-Only Cookie
+  res.cookie('refreshToken', refreshToken, getCookieOptions());
+
+  const userPayload = {
+    id: userId,
+    fullName: userRecord.fullName,
+    email: userRecord.email,
+    phone: userRecord.phone,
+    role: role,
+    ...(userRecord.company && { company: userRecord.company }),
+    ...(userRecord.sosContact && { sosContact: userRecord.sosContact }),
+    ...(role === 'driver' && {
+      vehicleName: userRecord.vehicleName,
+      vehicleNumber: userRecord.vehicleNumber,
+      licenseNumber: userRecord.licenseNumber,
+      availableSeats: userRecord.availableSeats,
+      verificationStatus: userRecord.verificationStatus,
+      isVerified: userRecord.isVerified
+    })
+  };
+
+  res.status(statusCode).json({
+    success: true,
+    token: accessToken, // Access token for Authorization header
+    role: role,
+    user: userPayload
+  });
+};
 
 // @desc    Register a new user
 // @route   POST /api/auth/register
@@ -18,47 +59,26 @@ const registerUser = async (req, res) => {
     availableSeats
   } = req.body;
 
-  // Validate generic required fields
-  if (!fullName || !email || !phone || !password) {
-    res.status(400);
-    throw new Error('Please enter all required generic registration fields');
-  }
-
-  // Validate role
   const userRole = role || 'passenger';
-  if (!['passenger', 'driver'].includes(userRole)) {
-    res.status(400);
-    throw new Error('Invalid registration role provided');
-  }
 
   // Check email uniqueness across both Passenger (User) and Driver collections
   const userExists = await User.findOne({ email });
   const driverExists = await Driver.findOne({ email });
   if (userExists || driverExists) {
-    res.status(400);
-    throw new Error('A user with this email address already exists');
+    throw new AppError('A user with this email address already exists', 400);
   }
 
   if (userRole === 'driver') {
-    // Validate driver-specific requirements
-    if (!vehicleName || !vehicleNumber || !licenseNumber) {
-      res.status(400);
-      throw new Error('Drivers must provide vehicle spec details, license number, and available seat counts');
-    }
-
-    // Extract file uploads
     const licenseImageFile = req.files && req.files['licenseImage'] ? req.files['licenseImage'][0] : null;
     const rcDocumentFile = req.files && req.files['rcDocument'] ? req.files['rcDocument'][0] : null;
 
     if (!licenseImageFile) {
-      res.status(400);
-      throw new Error('Drivers must upload a driving license image');
+      throw new AppError('Drivers must upload a driving license image', 400);
     }
 
     const licenseImagePath = `uploads/${licenseImageFile.filename}`;
     const rcDocumentPath = rcDocumentFile ? `uploads/${rcDocumentFile.filename}` : '';
 
-    // Create new driver in Driver collection
     const driver = await Driver.create({
       fullName,
       email,
@@ -76,28 +96,11 @@ const registerUser = async (req, res) => {
     });
 
     if (driver) {
-      res.status(201).json({
-        success: true,
-        token: generateToken(driver._id, 'driver'),
-        user: {
-          id: driver._id,
-          fullName: driver.fullName,
-          email: driver.email,
-          phone: driver.phone,
-          role: 'driver',
-          vehicleName: driver.vehicleName,
-          vehicleNumber: driver.vehicleNumber,
-          licenseNumber: driver.licenseNumber,
-          availableSeats: driver.availableSeats,
-          uploadedDocuments: driver.uploadedDocuments
-        }
-      });
+      sendAuthResponse(res, 201, driver, 'driver');
     } else {
-      res.status(500);
-      throw new Error('Internal server error during driver creation');
+      throw new AppError('Internal server error during driver creation', 500);
     }
   } else {
-    // Create passenger in User collection
     const user = await User.create({
       fullName,
       email,
@@ -107,20 +110,9 @@ const registerUser = async (req, res) => {
     });
 
     if (user) {
-      res.status(201).json({
-        success: true,
-        token: generateToken(user._id, 'passenger'),
-        user: {
-          id: user._id,
-          fullName: user.fullName,
-          email: user.email,
-          phone: user.phone,
-          role: 'passenger'
-        }
-      });
+      sendAuthResponse(res, 201, user, 'passenger');
     } else {
-      res.status(500);
-      throw new Error('Internal server error during passenger creation');
+      throw new AppError('Internal server error during passenger creation', 500);
     }
   }
 };
@@ -131,87 +123,76 @@ const registerUser = async (req, res) => {
 const loginUser = async (req, res) => {
   const { email, password } = req.body;
 
-  // Validate inputs
-  if (!email || !password) {
-    res.status(400);
-    throw new Error('Please provide email and password coordinates');
-  }
-
-  // STEP 1: Check for hardcoded admin credentials
-  if (email === 'admin@taxipool.com' && password === 'Admin@123') {
-    return res.status(200).json({
-      success: true,
-      token: generateToken('admin-static-id', 'admin'),
-      role: "admin",
-      user: {
-        id: "admin-static-id",
-        fullName: "Platform Admin",
-        email: "admin@taxipool.com",
-        role: "admin"
-      }
-    });
-  }
-
-  // STEP 2: Search passenger in users collection
-  const passenger = await User.findOne({ email });
-  if (passenger) {
-    const isMatch = await passenger.matchPassword(password);
+  // Search passenger or admin in users collection
+  const passengerOrAdmin = await User.findOne({ email });
+  if (passengerOrAdmin) {
+    const isMatch = await passengerOrAdmin.matchPassword(password);
     if (isMatch) {
-      return res.status(200).json({
-        success: true,
-        token: generateToken(passenger._id, passenger.role),
-        role: passenger.role,
-        user: {
-          id: passenger._id,
-          fullName: passenger.fullName,
-          email: passenger.email,
-          phone: passenger.phone,
-          role: passenger.role,
-          company: passenger.company,
-          sosContact: passenger.sosContact
-        }
-      });
+      return sendAuthResponse(res, 200, passengerOrAdmin, passengerOrAdmin.role);
     } else {
-      res.status(401);
-      throw new Error('Invalid email or password coordinates');
+      throw new AppError('Invalid email or password coordinates', 401);
     }
   }
 
-  // STEP 3: Search driver in drivers collection
+  // Search driver in drivers collection
   const driver = await Driver.findOne({ email });
   if (driver) {
     const isMatch = await driver.matchPassword(password);
     if (isMatch) {
-      return res.status(200).json({
-        success: true,
-        token: generateToken(driver._id, 'driver'),
-        role: 'driver',
-        user: {
-          id: driver._id,
-          fullName: driver.fullName,
-          email: driver.email,
-          phone: driver.phone,
-          role: 'driver',
-          vehicleName: driver.vehicleName,
-          vehicleNumber: driver.vehicleNumber,
-          licenseNumber: driver.licenseNumber,
-          availableSeats: driver.availableSeats,
-          company: driver.company,
-          sosContact: driver.sosContact
-        }
-      });
+      return sendAuthResponse(res, 200, driver, 'driver');
     } else {
-      res.status(401);
-      throw new Error('Invalid email or password coordinates');
+      throw new AppError('Invalid email or password coordinates', 401);
     }
   }
 
-  // If not found in either collection
-  res.status(401);
-  throw new Error('Invalid email or password coordinates');
+  throw new AppError('Invalid email or password coordinates', 401);
+};
+
+// @desc    Refresh session tokens (Token Rotation)
+// @route   POST /api/auth/refresh
+// @access  Public (via HTTP-Only Cookie or Payload)
+const refreshSession = async (req, res) => {
+  const refreshToken = req.cookies?.refreshToken || req.body?.refreshToken;
+
+  if (!refreshToken) {
+    throw new AppError('Refresh token missing or expired', 401);
+  }
+
+  try {
+    const decoded = verifyRefreshToken(refreshToken);
+    let user;
+
+    if (decoded.role === 'driver') {
+      user = await Driver.findById(decoded.id).select('-password');
+    } else {
+      user = await User.findById(decoded.id).select('-password');
+    }
+
+    if (!user) {
+      throw new AppError('User not found during token refresh', 401);
+    }
+
+    // Issue rotated access and refresh tokens
+    sendAuthResponse(res, 200, user, decoded.role);
+  } catch (error) {
+    throw new AppError('Invalid or expired refresh token. Please log in again.', 401);
+  }
+};
+
+// @desc    Logout user & clear refresh token cookie
+// @route   POST /api/auth/logout
+// @access  Public
+const logoutUser = async (req, res) => {
+  res.clearCookie('refreshToken', getCookieOptions());
+  res.status(200).json({
+    success: true,
+    message: 'Logged out successfully'
+  });
 };
 
 module.exports = {
   registerUser,
-  loginUser
+  loginUser,
+  refreshSession,
+  logoutUser
 };

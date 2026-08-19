@@ -9,6 +9,7 @@ const connectDB = async () => {
     console.warn('   The backend will start, but database operations will be disabled.');
     console.warn('   To enable database connection, set MONGO_URI in Backend/.env.');
     console.warn('========================================================================\n');
+    mongoose.set('bufferCommands', false);
     return;
   }
 
@@ -17,7 +18,7 @@ const connectDB = async () => {
     console.log(`📡 MongoDB Connected: ${conn.connection.host}`);
   } catch (error) {
     console.error(`❌ MongoDB Connection Error: ${error.message}`);
-    // Graceful handling during dev - don't crash the server so other routes still work
+    mongoose.set('bufferCommands', false);
   }
 };
 
