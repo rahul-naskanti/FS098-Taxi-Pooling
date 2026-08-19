@@ -57,6 +57,20 @@ if (Worker && process.env.NODE_ENV !== 'test') {
     });
 
     console.log('🚀 BullMQ Notification Worker initialized and listening to notification-queue.');
+
+    // Graceful Shutdown Handler for BullMQ Worker
+    const gracefulWorkerShutdown = async (signal) => {
+      console.log(`⚠️ [Worker] Received ${signal}. Closing BullMQ Worker...`);
+      if (notificationWorker) {
+        await notificationWorker.close();
+        console.log('✅ [Worker] BullMQ Worker closed cleanly.');
+      }
+      process.exit(0);
+    };
+
+    process.on('SIGTERM', () => gracefulWorkerShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulWorkerShutdown('SIGINT'));
+
   } catch (err) {
     console.error('⚠️ Failed to initialize BullMQ Worker:', err.message);
   }

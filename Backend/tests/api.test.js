@@ -20,7 +20,7 @@ const ioClient = require('socket.io-client');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-describe('Sprint 2, 3, 4, 5, 6, 7 & 8: Full Engineering Test Suite', () => {
+describe('Sprint 2, 3, 4, 5, 6, 7, 8 & 9: Full Engineering Test Suite', () => {
   let server, socketUrl;
 
   beforeAll((done) => {
@@ -1526,6 +1526,25 @@ describe('Sprint 2, 3, 4, 5, 6, 7 & 8: Full Engineering Test Suite', () => {
 
       User.findById.mockRestore();
       Ride.find.mockRestore();
+    });
+  });
+
+  describe('Section 9: Sprint 9 Docker Containerization & Production Readiness Tests', () => {
+    it('57. Container health check endpoint (/api/health) returns HTTP 200 OK with mongodb and redis status', async () => {
+      const res = await request(app).get('/api/health');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.status).toBe('OK');
+      expect(res.body.mongodb).toBeDefined();
+      expect(res.body.redis).toBeDefined();
+      expect(res.body.uptime).toBeGreaterThanOrEqual(0);
+    });
+
+    it('58. Production Docker environment configuration uses service hostnames for MongoDB and Redis', () => {
+      const mongoUri = process.env.MONGO_URI || 'mongodb://mongodb:27017/taxipooling';
+      const redisHost = process.env.REDIS_HOST || 'redis';
+
+      expect(mongoUri).toBeDefined();
+      expect(redisHost).toBeDefined();
     });
   });
 

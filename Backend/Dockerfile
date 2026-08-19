@@ -1,13 +1,24 @@
-FROM node:18-alpine
+# Stage 1: Dependency Installation Stage
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
 
+# Stage 2: Production Lightweight Runtime Image
+FROM node:20-alpine AS runner
 WORKDIR /app
 
+ENV NODE_ENV=production
+ENV PORT=5000
+
+# Copy production dependencies and application source
+COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
+COPY src ./src
 
-RUN npm install
+# Use non-root node user for security hardening
+USER node
 
-COPY . .
+EXPOSE 5000
 
-EXPOSE 5001
-
-CMD ["npm", "start"]
+CMD ["node", "src/server.js"]
