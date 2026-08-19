@@ -14,14 +14,16 @@ const {
   saveRide
 } = require('../controllers/rideController');
 const { protect, authorizeRoles, requireVerifiedDriver } = require('../middleware/authMiddleware');
-const { validateCreateRide } = require('../middleware/validateMiddleware');
+const { validate } = require('../middleware/validateMiddleware');
+const { createRideSchema, searchRideSchema } = require('../validators/ride.schema');
+const { objectIdParamSchema } = require('../validators/common.schema');
 
 // NOTE: Non-parameterized routes registered FIRST to prevent route parameter collision (Express matches top-to-bottom)
 
 // @route   GET /api/rides/search
 // @desc    Search active ride pools with filters
 // @access  Private
-router.get('/search', protect, searchRides);
+router.get('/search', protect, validate(searchRideSchema, 'query'), searchRides);
 
 // @route   POST /api/rides/save
 // @desc    Bookmark or save a ride
@@ -41,7 +43,14 @@ router.get('/passenger/bookings', protect, authorizeRoles('passenger'), getPasse
 // @route   POST /api/rides
 // @desc    Create a new ride pool
 // @access  Private (Verified Driver only)
-router.post('/', protect, authorizeRoles('driver'), requireVerifiedDriver, validateCreateRide, createRide);
+router.post(
+  '/',
+  protect,
+  authorizeRoles('driver'),
+  requireVerifiedDriver,
+  validate(createRideSchema, 'body'),
+  createRide
+);
 
 // @route   GET /api/rides
 // @desc    Get all active ride pools
@@ -51,12 +60,12 @@ router.get('/', protect, getAllRides);
 // @route   POST /api/rides/:id/remove-passenger
 // @desc    Remove a passenger from a ride pool (Driver only)
 // @access  Private (Driver only)
-router.post('/:id/remove-passenger', protect, authorizeRoles('driver'), removePassenger);
+router.post('/:id/remove-passenger', protect, authorizeRoles('driver'), validate(objectIdParamSchema, 'params'), removePassenger);
 
 // @route   POST /api/rides/:id/join
 // @desc    Join an active ride pool (Atomic)
 // @access  Private (Passenger only)
-router.post('/:id/join', protect, authorizeRoles('passenger'), joinRide);
+router.post('/:id/join', protect, authorizeRoles('passenger'), validate(objectIdParamSchema, 'params'), joinRide);
 
 // @route   POST /api/rides/:id/leave
 // @desc    Leave a joined ride pool
@@ -66,11 +75,11 @@ router.post('/:id/leave', protect, authorizeRoles('passenger'), leaveRide);
 // @route   PATCH /api/rides/:id/cancel
 // @desc    Cancel a ride pool
 // @access  Private (Driver only)
-router.patch('/:id/cancel', protect, authorizeRoles('driver'), cancelRide);
+router.patch('/:id/cancel', protect, authorizeRoles('driver'), validate(objectIdParamSchema, 'params'), cancelRide);
 
 // @route   GET /api/rides/:id
 // @desc    Get single ride pool by ID
 // @access  Private
-router.get('/:id', protect, getRideById);
+router.get('/:id', protect, validate(objectIdParamSchema, 'params'), getRideById);
 
 module.exports = router;

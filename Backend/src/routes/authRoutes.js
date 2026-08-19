@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { registerUser, loginUser, refreshSession, logoutUser } = require('../controllers/authController');
 const upload = require('../middleware/uploadMiddleware');
-const { validateRegistration, validateLogin } = require('../middleware/validateMiddleware');
+const { validate } = require('../middleware/validateMiddleware');
+const { registerSchema, loginSchema } = require('../validators/auth.schema');
 
 // Wrapper middleware to execute multer only for multipart/form-data requests (e.g. driver signup with file uploads)
 const handleUpload = (req, res, next) => {
@@ -20,12 +21,12 @@ const handleUpload = (req, res, next) => {
 // @route   POST /api/auth/register
 // @desc    Register a new user
 // @access  Public
-router.post('/register', handleUpload, validateRegistration, registerUser);
+router.post('/register', handleUpload, validate(registerSchema, 'body'), registerUser);
 
 // @route   POST /api/auth/login
 // @desc    Authenticate user & get token
 // @access  Public
-router.post('/login', validateLogin, loginUser);
+router.post('/login', validate(loginSchema, 'body'), loginUser);
 
 // @route   POST /api/auth/refresh
 // @desc    Refresh session & get new access token (Token Rotation)

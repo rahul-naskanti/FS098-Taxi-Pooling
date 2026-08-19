@@ -1,9 +1,21 @@
 const AppError = require('../utils/AppError');
+const { ZodError } = require('zod');
 
 const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
   error.statusCode = err.statusCode || (res.statusCode && res.statusCode !== 200 ? res.statusCode : 500);
+
+  // Zod Validation Error (if passed directly)
+  if (err instanceof ZodError || err.name === 'ZodError') {
+    const issues = err.issues || err.errors || [];
+    const fieldErrors = Array.isArray(issues) ? issues.map((e) => ({
+      field: e.path && e.path.length > 0 ? e.path.join('.') : 'payload',
+      message: e.message
+    })) : [];
+    const message = `Validation Error: ${fieldErrors.map((e) => e.message).join(', ')}`;
+    error = new AppError(message, 400, fieldErrors);
+  }
 
   // Mongoose Bad ObjectId (CastError)
   if (err.name === 'CastError') {

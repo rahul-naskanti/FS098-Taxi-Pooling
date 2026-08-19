@@ -1,75 +1,35 @@
 const AppError = require('../utils/AppError');
 
-// Validation helper for user registration
-const validateRegistration = (req, res, next) => {
-  const { fullName, email, phone, password, role, vehicleName, vehicleNumber, licenseNumber } = req.body;
+/**
+ * Reusable Zod validation middleware factory.
+ * @param {import('zod').ZodSchema} schema - Zod schema to validate against
+ * @param {'body' | 'params' | 'query'} source - Request property to validate ('body', 'params', 'query')
+ */
+const validate = (schema, source = 'body') => {
+  return (req, res, next) => {
+    try {
+      const result = schema.safeParse(req[source] || {});
 
-  if (!fullName || typeof fullName !== 'string' || fullName.trim() === '') {
-    return next(new AppError('Full name is required', 400));
-  }
+      if (!result.success) {
+        const issues = result.error.issues || result.error.errors || [];
+        const fieldErrors = issues.map((err) => ({
+          field: err.path && err.path.length > 0 ? err.path.join('.') : 'payload',
+          message: err.message
+        }));
 
-  if (!email || !email.includes('@')) {
-    return next(new AppError('A valid email address is required', 400));
-  }
+        const errorMessage = `Validation Error: ${fieldErrors.map((e) => e.message).join(', ')}`;
+        return next(new AppError(errorMessage, 400, fieldErrors));
+      }
 
-  if (!phone || typeof phone !== 'string' || phone.trim() === '') {
-    return next(new AppError('Phone number is required', 400));
-  }
-
-  if (!password || password.length < 6) {
-    return next(new AppError('Password must be at least 6 characters long', 400));
-  }
-
-  const userRole = role || 'passenger';
-  if (!['passenger', 'driver'].includes(userRole)) {
-    return next(new AppError('Invalid user role specified', 400));
-  }
-
-  if (userRole === 'driver') {
-    if (!vehicleName || !vehicleNumber || !licenseNumber) {
-      return next(new AppError('Drivers must provide vehicle model, license plate, and license number', 400));
+      // Replace req[source] with sanitized and coerced data output by Zod
+      req[source] = result.data;
+      next();
+    } catch (error) {
+      next(error);
     }
-  }
-
-  next();
-};
-
-// Validation helper for user login
-const validateLogin = (req, res, next) => {
-  const { email, password } = req.body;
-
-  if (!email || !email.includes('@')) {
-    return next(new AppError('Please provide a valid email address', 400));
-  }
-
-  if (!password) {
-    return next(new AppError('Please provide a password', 400));
-  }
-
-  next();
-};
-
-// Validation helper for ride creation
-const validateCreateRide = (req, res, next) => {
-  const { pickupLocation, dropLocation, departureDate, departureTime, availableSeats, pricePerSeat, vehicleType } = req.body;
-
-  if (!pickupLocation || !dropLocation || !departureDate || !departureTime || availableSeats === undefined || pricePerSeat === undefined || !vehicleType) {
-    return next(new AppError('Please fill in all required ride parameters', 400));
-  }
-
-  if (Number(availableSeats) <= 0) {
-    return next(new AppError('Available seats must be at least 1', 400));
-  }
-
-  if (Number(pricePerSeat) < 0) {
-    return next(new AppError('Price per seat cannot be negative', 400));
-  }
-
-  next();
+  };
 };
 
 module.exports = {
-  validateRegistration,
-  validateLogin,
-  validateCreateRide
+  validate
 };
