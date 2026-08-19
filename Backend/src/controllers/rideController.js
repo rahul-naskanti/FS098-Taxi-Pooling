@@ -631,6 +631,42 @@ const getRecentSearches = async (req, res) => {
   });
 };
 
+// @desc    Find best matched rides using multi-factor scoring
+// @route   POST /api/rides/match
+// @access  Private
+const findMatchedRides = async (req, res) => {
+  const rideMatchingService = require('../services/rideMatchingService');
+  const {
+    pickupLatitude,
+    pickupLongitude,
+    dropLatitude,
+    dropLongitude,
+    departureDate,
+    requestedSeats,
+    maxRadiusKm
+  } = req.body;
+
+  if (pickupLatitude === undefined || pickupLongitude === undefined) {
+    throw new AppError('pickupLatitude and pickupLongitude are required in request body', 400);
+  }
+
+  const matches = await rideMatchingService.findBestMatches({
+    pickupLatitude,
+    pickupLongitude,
+    dropLatitude,
+    dropLongitude,
+    departureDate,
+    requestedSeats: requestedSeats || 1,
+    maxRadiusKm: maxRadiusKm || 20
+  });
+
+  res.status(200).json({
+    success: true,
+    count: matches.length,
+    matches
+  });
+};
+
 module.exports = {
   createRide,
   getAllRides,
@@ -647,5 +683,7 @@ module.exports = {
   createBooking,
   saveRide,
   getSavedRides,
-  getRecentSearches
+  getRecentSearches,
+  findMatchedRides
 };
+

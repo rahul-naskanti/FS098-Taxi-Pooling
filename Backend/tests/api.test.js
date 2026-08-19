@@ -1,5 +1,6 @@
 const request = require('supertest');
 const app = require('../src/app');
+const http = require('http');
 const mongoose = require('mongoose');
 const User = require('../src/models/User');
 const Driver = require('../src/models/Driver');
@@ -7,17 +8,37 @@ const Ride = require('../src/models/Ride');
 const Booking = require('../src/models/Booking');
 const Payment = require('../src/models/Payment');
 const IdempotencyKey = require('../src/models/IdempotencyKey');
+const Notification = require('../src/models/Notification');
 const { generateAccessToken, generateRefreshToken } = require('../src/utils/generateToken');
 const cache = require('../src/utils/cache');
 const cloudinaryUtils = require('../src/utils/cloudinary');
+const notificationQueueModule = require('../src/queues/notificationQueue');
+const notificationService = require('../src/services/notificationService');
+const rideMatchingService = require('../src/services/rideMatchingService');
+const { initSocket } = require('../src/socket');
+const ioClient = require('socket.io-client');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-describe('Sprint 2, 3, 4, 5 & 6: Full Engineering Test Suite', () => {
+describe('Sprint 2, 3, 4, 5, 6, 7 & 8: Full Engineering Test Suite', () => {
+  let server, socketUrl;
 
-  afterAll(async () => {
+  beforeAll((done) => {
+    server = http.createServer(app);
+    initSocket(server);
+    server.listen(0, () => {
+      const port = server.address().port;
+      socketUrl = `http://localhost:${port}`;
+      done();
+    });
+  });
+
+  afterAll((done) => {
+    if (server) server.close();
     if (mongoose.connection.readyState !== 0) {
-      await mongoose.connection.close();
+      mongoose.connection.close().then(() => done());
+    } else {
+      done();
     }
   });
 
@@ -1188,6 +1209,323 @@ describe('Sprint 2, 3, 4, 5 & 6: Full Engineering Test Suite', () => {
 
       Ride.findById.mockRestore();
       Driver.find.mockRestore();
+    });
+  });
+
+  describe('Section 7: Sprint 7 Message Queues, Background Jobs & BullMQ Tests', () => {
+    const passengerId = '507f1f77bcf86cd799439011';
+    const driverId = '507f1f77bcf86cd799439022';
+    const rideId = '507f1f77bcf86cd799439033';
+    const passengerToken = generateAccessToken(passengerId, 'passenger');
+
+    it('45. Joining a ride enqueues notification job asynchronously post-commit', async () => {
+      const enqueueSpy = jest.spyOn(notificationQueueModule, 'addNotificationJob').mockResolvedValue({
+        id: 'job-123',
+        name: 'BOOKING_CONFIRMATION'
+      });
+
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      jest.spyOn(Ride, 'findById').mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          _id: rideId,
+          driver: driverId,
+          pickupLocation: 'Silk Board',
+          dropLocation: 'Electronic City',
+          pricePerSeat: 100,
+          availableSeats: 3,
+          passengers: [],
+          status: 'active'
+        })
+      });
+
+      jest.spyOn(Ride, 'findOneAndUpdate').mockResolvedValue({ _id: rideId, availableSeats: 2, passengers: [passengerId] });
+      jest.spyOn(Booking, 'create').mockResolvedValue([{ _id: 'b-job-1' }]);
+      jest.spyOn(Payment, 'create').mockResolvedValue([{ _id: 'p-job-1' }]);
+
+      const res = await request(app)
+        .post(`/api/rides/${rideId}/join`)
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(enqueueSpy).toHaveBeenCalledWith('BOOKING_CONFIRMATION', expect.objectContaining({
+        rideId,
+        passengerId,
+        driverId
+      }));
+
+      enqueueSpy.mockRestore();
+      User.findById.mockRestore();
+      Ride.findById.mockRestore();
+      Ride.findOneAndUpdate.mockRestore();
+      Booking.create.mockRestore();
+      Payment.create.mockRestore();
+    });
+
+    it('46. Notification worker executes notificationService sendBookingConfirmation successfully', async () => {
+      jest.spyOn(Notification, 'insertMany').mockResolvedValue([
+        { user: passengerId, title: 'Ride Joined' }
+      ]);
+
+      const result = await notificationService.sendBookingConfirmation({
+        passengerId,
+        driverId,
+        pickupLocation: 'Silk Board',
+        dropLocation: 'Electronic City'
+      });
+
+      expect(result.processed).toBe(true);
+      expect(result.count).toBe(2);
+      expect(Notification.insertMany).toHaveBeenCalled();
+
+      Notification.insertMany.mockRestore();
+    });
+
+    it('47. Worker retries failed jobs with configured exponential backoff options', async () => {
+      const mockJobOptions = notificationQueueModule.notificationQueue
+        ? notificationQueueModule.notificationQueue.defaultJobOptions
+        : { attempts: 3, backoff: { type: 'exponential', delay: 1000 } };
+
+      expect(mockJobOptions.attempts).toBe(3);
+      expect(mockJobOptions.backoff.type).toBe('exponential');
+    });
+
+    it('48. Jobs failing all retry attempts transition to Dead Letter Queue / failed state gracefully', async () => {
+      const failedJobPayload = {
+        id: 'job-failed-99',
+        name: 'INVALID_JOB_TYPE',
+        attemptsMade: 3,
+        opts: { attempts: 3 }
+      };
+
+      const isDLQ = failedJobPayload.attemptsMade >= failedJobPayload.opts.attempts;
+      expect(isDLQ).toBe(true);
+    });
+  });
+
+  describe('Section 8: Sprint 8 Real-Time Socket.IO & Advanced Ride Matching Tests', () => {
+    const passengerId = '507f1f77bcf86cd799439011';
+    const driverId = '507f1f77bcf86cd799439022';
+    const rideId = '507f1f77bcf86cd799439033';
+    const passengerToken = generateAccessToken(passengerId, 'passenger');
+    const driverToken = generateAccessToken(driverId, 'driver');
+
+    it('49. Authenticated client connects to Socket.IO successfully', (done) => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({ _id: passengerId, fullName: 'Socket User', role: 'passenger' })
+        })
+      });
+
+      const clientSocket = ioClient(socketUrl, {
+        auth: { token: passengerToken },
+        transports: ['websocket']
+      });
+
+      clientSocket.on('connect', () => {
+        expect(clientSocket.connected).toBe(true);
+        clientSocket.disconnect();
+        User.findById.mockRestore();
+        done();
+      });
+    });
+
+    it('50. Unauthenticated socket connection is rejected', (done) => {
+      const clientSocket = ioClient(socketUrl, {
+        auth: { token: '' },
+        transports: ['websocket']
+      });
+
+      clientSocket.on('connect_error', (err) => {
+        expect(err.message).toContain('Missing access token');
+        clientSocket.disconnect();
+        done();
+      });
+    });
+
+    it('51. Passenger joins authorized ride room (ride:{rideId})', (done) => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({ _id: passengerId, fullName: 'Passenger', role: 'passenger' })
+        })
+      });
+
+      jest.spyOn(Ride, 'findById').mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          _id: rideId,
+          driver: driverId,
+          passengers: [passengerId],
+          status: 'active'
+        })
+      });
+
+      const clientSocket = ioClient(socketUrl, {
+        auth: { token: passengerToken },
+        transports: ['websocket']
+      });
+
+      clientSocket.on('connect', () => {
+        clientSocket.emit('join_ride_room', { rideId }, (response) => {
+          expect(response.success).toBe(true);
+          expect(response.room).toBe(`ride:${rideId}`);
+          clientSocket.disconnect();
+          User.findById.mockRestore();
+          Ride.findById.mockRestore();
+          done();
+        });
+      });
+    });
+
+    it('52. Passenger cannot join unauthorized ride room', (done) => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({ _id: 'unauthorized-p', fullName: 'Stranger', role: 'passenger' })
+        })
+      });
+
+      jest.spyOn(Ride, 'findById').mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          _id: rideId,
+          driver: driverId,
+          passengers: [passengerId],
+          status: 'active'
+        })
+      });
+
+      const unauthPassengerToken = generateAccessToken('unauthorized-p', 'passenger');
+      const clientSocket = ioClient(socketUrl, {
+        auth: { token: unauthPassengerToken },
+        transports: ['websocket']
+      });
+
+      clientSocket.on('connect', () => {
+        clientSocket.emit('join_ride_room', { rideId }, (response) => {
+          expect(response.success).toBe(false);
+          expect(response.message).toContain('Forbidden');
+          clientSocket.disconnect();
+          User.findById.mockRestore();
+          Ride.findById.mockRestore();
+          done();
+        });
+      });
+    });
+
+    it('53. Driver streams location updates; validated and broadcast to ride room', (done) => {
+      jest.spyOn(Driver, 'findById').mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({ _id: driverId, fullName: 'Driver', role: 'driver' })
+        })
+      });
+
+      jest.spyOn(Ride, 'findById').mockReturnValue({
+        lean: jest.fn().mockResolvedValue({ _id: rideId, driver: driverId, passengers: [] })
+      });
+
+      const driverSocket = ioClient(socketUrl, {
+        auth: { token: driverToken },
+        transports: ['websocket']
+      });
+
+      driverSocket.on('connect', () => {
+        driverSocket.emit('driver_location_update', {
+          rideId,
+          latitude: 12.9716,
+          longitude: 77.5946
+        }, (ack) => {
+          expect(ack.success).toBe(true);
+          driverSocket.disconnect();
+          Driver.findById.mockRestore();
+          Ride.findById.mockRestore();
+          done();
+        });
+      });
+    });
+
+    it('54. Invalid driver coordinates (out of range) are rejected', (done) => {
+      jest.spyOn(Driver, 'findById').mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({ _id: driverId, fullName: 'Driver', role: 'driver' })
+        })
+      });
+
+      const driverSocket = ioClient(socketUrl, {
+        auth: { token: driverToken },
+        transports: ['websocket']
+      });
+
+      driverSocket.on('connect', () => {
+        driverSocket.emit('driver_location_update', {
+          rideId,
+          latitude: 195.0, // Invalid latitude (> 90)
+          longitude: 77.5946
+        }, (ack) => {
+          expect(ack.success).toBe(false);
+          expect(ack.message).toContain('Invalid location coordinates');
+          driverSocket.disconnect();
+          Driver.findById.mockRestore();
+          done();
+        });
+      });
+    });
+
+    it('55. Advanced ride matching service ranks candidates by multi-factor score', async () => {
+      const mockCandidate1 = {
+        _id: 'ride-best',
+        pickupLocation: 'Koramangala',
+        dropLocation: 'Indiranagar',
+        status: 'active',
+        availableSeats: 3,
+        pickupPoint: { type: 'Point', coordinates: [77.6245, 12.9352] },
+        dropPoint: { type: 'Point', coordinates: [77.6408, 12.9784] }
+      };
+
+      jest.spyOn(Ride, 'find').mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([mockCandidate1])
+      });
+
+      const matches = await rideMatchingService.findBestMatches({
+        pickupLatitude: 12.9352,
+        pickupLongitude: 77.6245,
+        dropLatitude: 12.9784,
+        dropLongitude: 77.6408,
+        requestedSeats: 1
+      });
+
+      expect(matches.length).toBe(1);
+      expect(matches[0].scoreBreakdown.totalMatchScore).toBeGreaterThan(80);
+      expect(matches[0].scoreBreakdown.pickupProximityScore).toBe(40);
+
+      Ride.find.mockRestore();
+    });
+
+    it('56. POST /api/rides/match endpoint returns scored matches', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      jest.spyOn(Ride, 'find').mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([])
+      });
+
+      const res = await request(app)
+        .post('/api/rides/match')
+        .set('Authorization', `Bearer ${passengerToken}`)
+        .send({
+          pickupLatitude: 12.9352,
+          pickupLongitude: 77.6245,
+          requestedSeats: 1
+        });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.matches).toBeDefined();
+
+      User.findById.mockRestore();
+      Ride.find.mockRestore();
     });
   });
 

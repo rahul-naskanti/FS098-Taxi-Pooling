@@ -13,7 +13,8 @@ const {
   getNearbyRides,
   getRidesWithinArea,
   getRideById,
-  saveRide
+  saveRide,
+  findMatchedRides
 } = require('../controllers/rideController');
 const { protect, authorizeRoles, requireVerifiedDriver } = require('../middleware/authMiddleware');
 const { validate } = require('../middleware/validateMiddleware');
@@ -22,6 +23,11 @@ const { createRideSchema, searchRideSchema, nearbyRideQuerySchema } = require('.
 const { objectIdParamSchema } = require('../validators/common.schema');
 
 // NOTE: Non-parameterized routes registered FIRST to prevent route parameter collision (Express matches top-to-bottom)
+
+// @route   POST /api/rides/match
+// @desc    Find best matched rides using multi-factor scoring
+// @access  Private
+router.post('/match', protect, findMatchedRides);
 
 // @route   GET /api/rides/search
 // @desc    Search active ride pools with filters

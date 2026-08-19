@@ -6,6 +6,7 @@ const Payment = require('../models/Payment');
 const Notification = require('../models/Notification');
 const AppError = require('../utils/AppError');
 const cache = require('../utils/cache');
+const notificationQueue = require('../queues/notificationQueue');
 
 // Helper to compute Haversine distance in kilometers
 function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
@@ -191,7 +192,7 @@ class RideService {
   }
 
   /**
-   * Transactional & Atomic ride pool join logic with Mongoose Session & Post-Commit Cache Invalidation
+   * Transactional & Atomic ride pool join logic with Mongoose Session & Post-Commit Message Queue Job Enqueuing
    */
   async joinRide(rideId, passengerId) {
     const existingRide = await Ride.findById(rideId).lean();
@@ -292,26 +293,15 @@ class RideService {
       await executeBookingSteps(null);
     }
 
-    // Side Effects OUTSIDE transaction boundary (Notifications & Cache Invalidation AFTER commit)
-    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(passengerId)) {
-      await Notification.create({
-        user: passengerId,
-        userModel: 'User',
-        title: 'Ride Joined',
-        message: `Joined ride pool from ${existingRide.pickupLocation} to ${existingRide.dropLocation}.`,
-        type: 'join'
-      }).catch((err) => console.error('Notification creation error:', err));
-    }
-
-    if (mongoose.connection.readyState === 1 && existingRide.driver && mongoose.Types.ObjectId.isValid(existingRide.driver)) {
-      await Notification.create({
-        user: existingRide.driver,
-        userModel: 'Driver',
-        title: 'New Passenger Joined',
-        message: `A passenger has joined your ride pool from ${existingRide.pickupLocation} to ${existingRide.dropLocation}.`,
-        type: 'join'
-      }).catch((err) => console.error('Notification creation error:', err));
-    }
+    // POST-COMMIT ASYNCHRONOUS SIDE EFFECTS: Enqueue notification job into BullMQ Queue
+    await notificationQueue.addNotificationJob('BOOKING_CONFIRMATION', {
+      bookingId: booking ? booking._id : null,
+      rideId,
+      passengerId,
+      driverId: existingRide.driver,
+      pickupLocation: existingRide.pickupLocation,
+      dropLocation: existingRide.dropLocation
+    });
 
     // POST-COMMIT CACHE INVALIDATION
     await cache.delCache(`ride:${rideId}`);
