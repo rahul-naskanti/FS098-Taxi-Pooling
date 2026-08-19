@@ -1,5 +1,21 @@
 const mongoose = require('mongoose');
 
+const pointSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+      required: true
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      required: true
+    }
+  },
+  { _id: false }
+);
+
 const rideSchema = new mongoose.Schema(
   {
     driver: {
@@ -16,6 +32,13 @@ const rideSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Drop location is required'],
       trim: true
+    },
+    // GeoJSON Point location representation
+    pickupPoint: {
+      type: pointSchema
+    },
+    dropPoint: {
+      type: pointSchema
     },
     departureDate: {
       type: String,
@@ -120,10 +143,14 @@ rideSchema.pre('save', function (next) {
   next();
 });
 
-// Create compound index for date and time search optimization
+// Create 2dsphere geospatial indexes for spatial query optimization
+rideSchema.index({ pickupPoint: '2dsphere' });
+rideSchema.index({ dropPoint: '2dsphere' });
+
+// Compound index for date and time search optimization
 rideSchema.index({ departureDate: 1, departureTime: 1 });
 
-// Optimize search queries with single-field indexes
+// Single-field indexes
 rideSchema.index({ pickupLocation: 1 });
 rideSchema.index({ dropLocation: 1 });
 rideSchema.index({ departureDate: 1 });

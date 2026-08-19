@@ -10,13 +10,15 @@ const {
   leaveRide,
   removePassenger,
   searchRides,
+  getNearbyRides,
+  getRidesWithinArea,
   getRideById,
   saveRide
 } = require('../controllers/rideController');
 const { protect, authorizeRoles, requireVerifiedDriver } = require('../middleware/authMiddleware');
 const { validate } = require('../middleware/validateMiddleware');
 const { checkIdempotency } = require('../middleware/idempotencyMiddleware');
-const { createRideSchema, searchRideSchema } = require('../validators/ride.schema');
+const { createRideSchema, searchRideSchema, nearbyRideQuerySchema } = require('../validators/ride.schema');
 const { objectIdParamSchema } = require('../validators/common.schema');
 
 // NOTE: Non-parameterized routes registered FIRST to prevent route parameter collision (Express matches top-to-bottom)
@@ -25,6 +27,16 @@ const { objectIdParamSchema } = require('../validators/common.schema');
 // @desc    Search active ride pools with filters
 // @access  Private
 router.get('/search', protect, validate(searchRideSchema, 'query'), searchRides);
+
+// @route   GET /api/rides/nearby
+// @desc    Find active ride pools near coordinates using $near ($maxDistance)
+// @access  Private
+router.get('/nearby', protect, validate(nearbyRideQuerySchema, 'query'), getNearbyRides);
+
+// @route   GET /api/rides/within
+// @desc    Find active ride pools within radius using $geoWithin ($centerSphere)
+// @access  Private
+router.get('/within', protect, validate(nearbyRideQuerySchema, 'query'), getRidesWithinArea);
 
 // @route   POST /api/rides/save
 // @desc    Bookmark or save a ride

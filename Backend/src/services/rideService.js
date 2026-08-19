@@ -7,9 +7,22 @@ const Notification = require('../models/Notification');
 const AppError = require('../utils/AppError');
 const { getCache, setCache, delCache } = require('../utils/cache');
 
+// Helper to compute Haversine distance in kilometers
+function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6378.1; // Earth radius in kilometers
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Number((R * c).toFixed(2));
+}
+
 class RideService {
   /**
-   * Create a new ride pool
+   * Create a new ride pool with optional GeoJSON coordinates
    */
   async createRide(rideData, driverId) {
     const {
@@ -20,13 +33,33 @@ class RideService {
       availableSeats,
       pricePerSeat,
       vehicleType,
-      notes
+      notes,
+      pickupCoordinates,
+      dropCoordinates
     } = rideData;
+
+    let pickupPoint;
+    if (pickupCoordinates && pickupCoordinates.latitude !== undefined && pickupCoordinates.longitude !== undefined) {
+      pickupPoint = {
+        type: 'Point',
+        coordinates: [Number(pickupCoordinates.longitude), Number(pickupCoordinates.latitude)]
+      };
+    }
+
+    let dropPoint;
+    if (dropCoordinates && dropCoordinates.latitude !== undefined && dropCoordinates.longitude !== undefined) {
+      dropPoint = {
+        type: 'Point',
+        coordinates: [Number(dropCoordinates.longitude), Number(dropCoordinates.latitude)]
+      };
+    }
 
     const ride = await Ride.create({
       driver: driverId,
       pickupLocation,
       dropLocation,
+      ...(pickupPoint && { pickupPoint }),
+      ...(dropPoint && { dropPoint }),
       departureDate,
       departureTime,
       availableSeats: Number(availableSeats),
@@ -61,6 +94,78 @@ class RideService {
 
     await setCache(cacheKey, { success: true, rides }, 300);
     return rides;
+  }
+
+  /**
+   * Geospatial search using MongoDB $near operator (sorted by distance)
+   */
+  async getNearbyRides({ latitude, longitude, radiusKm = 5, limit = 10 }) {
+    const maxDistanceMeters = radiusKm * 1000;
+
+    let rides = [];
+    try {
+      rides = await Ride.find({
+        status: 'active',
+        availableSeats: { $gt: 0 },
+        pickupPoint: {
+          $near: {
+            $geometry: {
+              type: 'Point',
+              coordinates: [Number(longitude), Number(latitude)]
+            },
+            $maxDistance: maxDistanceMeters
+          }
+        }
+      })
+      .populate('driver', 'fullName phone vehicleName vehicleNumber isVerified')
+      .limit(Number(limit))
+      .lean();
+    } catch (e) {
+      rides = [];
+    }
+
+    return (rides || []).map((ride) => {
+      let distanceKm = null;
+      if (ride.pickupPoint && ride.pickupPoint.coordinates) {
+        const [lng, lat] = ride.pickupPoint.coordinates;
+        distanceKm = calculateHaversineDistanceKm(latitude, longitude, lat, lng);
+      }
+      return { ...ride, distanceKm };
+    });
+  }
+
+  /**
+   * Geospatial search using MongoDB $geoWithin with $centerSphere operator
+   */
+  async getRidesWithinArea({ latitude, longitude, radiusKm = 5, limit = 10 }) {
+    const radiusRadians = radiusKm / 6378.1;
+
+    let rides = [];
+    try {
+      rides = await Ride.find({
+        status: 'active',
+        availableSeats: { $gt: 0 },
+        pickupPoint: {
+          $geoWithin: {
+            $centerSphere: [[Number(longitude), Number(latitude)], radiusRadians]
+          }
+        }
+      })
+      .populate('driver', 'fullName phone vehicleName vehicleNumber isVerified')
+      .limit(Number(limit))
+      .lean();
+    } catch (e) {
+      rides = [];
+    }
+
+    return (rides || []).map((ride) => {
+      let distanceKm = null;
+      if (ride.pickupPoint && ride.pickupPoint.coordinates) {
+        const [lng, lat] = ride.pickupPoint.coordinates;
+        distanceKm = calculateHaversineDistanceKm(latitude, longitude, lat, lng);
+      }
+      return { ...ride, distanceKm };
+    });
   }
 
   /**

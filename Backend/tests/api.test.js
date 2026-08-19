@@ -11,7 +11,7 @@ const { generateAccessToken, generateRefreshToken } = require('../src/utils/gene
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-describe('Sprint 2, 3 & 4: Full Engineering Test Suite', () => {
+describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
 
   afterAll(async () => {
     if (mongoose.connection.readyState !== 0) {
@@ -717,6 +717,179 @@ describe('Sprint 2, 3 & 4: Full Engineering Test Suite', () => {
       Ride.findOneAndUpdate.mockRestore();
       Booking.create.mockRestore();
       Payment.create.mockRestore();
+    });
+  });
+
+  describe('Section 4: Sprint 5 Geospatial Search & Location-Based Ride Matching Tests', () => {
+    const passengerId = '507f1f77bcf86cd799439011';
+    const driverId = '507f1f77bcf86cd799439022';
+    const passengerToken = generateAccessToken(passengerId, 'passenger');
+    const driverToken = generateAccessToken(driverId, 'driver');
+
+    // Bangalore Coordinates
+    // Koramangala: 12.9352° N, 77.6245° E -> GeoJSON [77.6245, 12.9352]
+    // Indiranagar: 12.9784° N, 77.6408° E -> GeoJSON [77.6408, 12.9784] (~5.1 km apart)
+
+    it('28. Unauthenticated request to /api/rides/nearby is rejected with 401', async () => {
+      const res = await request(app).get('/api/rides/nearby?latitude=12.9352&longitude=77.6245');
+      expect(res.statusCode).toBe(401);
+      expect(res.body.success).toBe(false);
+    });
+
+    it('29. Zod query schema rejects invalid latitude (> 90)', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      const res = await request(app)
+        .get('/api/rides/nearby?latitude=95.0&longitude=77.6245')
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.errors).toBeDefined();
+
+      User.findById.mockRestore();
+    });
+
+    it('30. Zod query schema rejects invalid longitude (< -180)', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      const res = await request(app)
+        .get('/api/rides/nearby?latitude=12.9352&longitude=-200.0')
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+
+      User.findById.mockRestore();
+    });
+
+    it('31. Zod query schema rejects invalid zero or negative radiusKm', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      const res = await request(app)
+        .get('/api/rides/nearby?latitude=12.9352&longitude=77.6245&radiusKm=0')
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.success).toBe(false);
+
+      User.findById.mockRestore();
+    });
+
+    it('32. Verified driver creating ride with pickupCoordinates stores GeoJSON [longitude, latitude]', async () => {
+      jest.spyOn(Driver, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({
+          _id: driverId,
+          role: 'driver',
+          isVerified: true,
+          verificationStatus: 'verified',
+          isActive: true
+        })
+      });
+
+      let createdRideData = null;
+      jest.spyOn(Ride, 'create').mockImplementation((data) => {
+        createdRideData = data;
+        return Promise.resolve({ _id: 'ride-geo-1', ...data });
+      });
+
+      const res = await request(app)
+        .post('/api/rides')
+        .set('Authorization', `Bearer ${driverToken}`)
+        .send({
+          pickupLocation: 'Koramangala 5th Block',
+          dropLocation: 'Indiranagar 100ft Road',
+          departureDate: '2026-09-01',
+          departureTime: '10:00 AM',
+          availableSeats: 3,
+          pricePerSeat: 120,
+          vehicleType: 'Sedan',
+          pickupCoordinates: { latitude: 12.9352, longitude: 77.6245 },
+          dropCoordinates: { latitude: 12.9784, longitude: 77.6408 }
+        });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(createdRideData.pickupPoint).toEqual({
+        type: 'Point',
+        coordinates: [77.6245, 12.9352] // Longitude FIRST, Latitude SECOND!
+      });
+
+      Driver.findById.mockRestore();
+      Ride.create.mockRestore();
+    });
+
+    it('33. GET /api/rides/nearby returns active rides with calculated distanceKm', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      const mockRide = {
+        _id: 'ride-near-1',
+        pickupLocation: 'Koramangala 5th Block',
+        dropLocation: 'Indiranagar',
+        status: 'active',
+        availableSeats: 2,
+        pickupPoint: { type: 'Point', coordinates: [77.6245, 12.9352] }
+      };
+
+      jest.spyOn(Ride, 'find').mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([mockRide])
+      });
+
+      // Searching from Koramangala center (12.9352, 77.6245)
+      const res = await request(app)
+        .get('/api/rides/nearby?latitude=12.9352&longitude=77.6245&radiusKm=5')
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.rides.length).toBe(1);
+      expect(res.body.rides[0].distanceKm).toBeDefined();
+      expect(res.body.rides[0].distanceKm).toBe(0); // Exact match = 0 km
+
+      User.findById.mockRestore();
+      Ride.find.mockRestore();
+    });
+
+    it('34. GET /api/rides/within returns active rides using $geoWithin operator', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      const mockRide = {
+        _id: 'ride-within-1',
+        pickupLocation: 'Indiranagar 100ft Road',
+        dropLocation: 'Whitefield',
+        status: 'active',
+        availableSeats: 3,
+        pickupPoint: { type: 'Point', coordinates: [77.6408, 12.9784] }
+      };
+
+      jest.spyOn(Ride, 'find').mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([mockRide])
+      });
+
+      const res = await request(app)
+        .get('/api/rides/within?latitude=12.9784&longitude=77.6408&radiusKm=10')
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.rides.length).toBe(1);
+
+      User.findById.mockRestore();
+      Ride.find.mockRestore();
     });
   });
 

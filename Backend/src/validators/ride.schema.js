@@ -1,5 +1,10 @@
 const { z } = require('zod');
 
+const coordinateSchema = z.object({
+  latitude: z.coerce.number({ required_error: 'Latitude is required' }).min(-90, 'Latitude must be between -90 and 90').max(90, 'Latitude must be between -90 and 90'),
+  longitude: z.coerce.number({ required_error: 'Longitude is required' }).min(-180, 'Longitude must be between -180 and 180').max(180, 'Longitude must be between -180 and 180')
+});
+
 const createRideSchema = z.object({
   pickupLocation: z.string({ required_error: 'Pickup location is required' }).trim().min(2, 'Pickup location must be at least 2 characters'),
   dropLocation: z.string({ required_error: 'Drop location is required' }).trim().min(2, 'Drop location must be at least 2 characters'),
@@ -8,6 +13,8 @@ const createRideSchema = z.object({
   availableSeats: z.coerce.number({ required_error: 'Available seats count is required' }).int().min(1, 'Available seats must be at least 1').max(10, 'Available seats cannot exceed 10'),
   pricePerSeat: z.coerce.number({ required_error: 'Price per seat is required' }).min(0, 'Price per seat cannot be negative'),
   vehicleType: z.string({ required_error: 'Vehicle type is required' }).trim().min(2, 'Vehicle type is required'),
+  pickupCoordinates: coordinateSchema.optional(),
+  dropCoordinates: coordinateSchema.optional(),
   notes: z.string().trim().optional(),
   instantBooking: z.boolean().optional(),
   femaleFriendly: z.boolean().optional(),
@@ -30,10 +37,19 @@ const searchRideSchema = z.object({
   timeRange: z.string().trim().optional()
 });
 
+const nearbyRideQuerySchema = z.object({
+  latitude: z.coerce.number({ required_error: 'Latitude parameter is required' }).min(-90, 'Latitude must be between -90 and 90').max(90, 'Latitude must be between -90 and 90'),
+  longitude: z.coerce.number({ required_error: 'Longitude parameter is required' }).min(-180, 'Longitude must be between -180 and 180').max(180, 'Longitude must be between -180 and 180'),
+  radiusKm: z.coerce.number().min(0.1, 'Radius must be greater than 0').max(500, 'Radius cannot exceed 500 km').optional().default(5),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(10)
+});
+
 const updateRideSchema = createRideSchema.partial();
 
 module.exports = {
+  coordinateSchema,
   createRideSchema,
   searchRideSchema,
+  nearbyRideQuerySchema,
   updateRideSchema
 };

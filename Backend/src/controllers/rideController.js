@@ -414,6 +414,44 @@ const searchRides = async (req, res) => {
   });
 };
 
+// @desc    Find nearby active rides using MongoDB $near operator
+// @route   GET /api/rides/nearby
+// @access  Private
+const getNearbyRides = async (req, res) => {
+  const { latitude, longitude, radiusKm, limit } = req.query;
+  const rides = await rideService.getNearbyRides({
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    radiusKm: Number(radiusKm) || 5,
+    limit: Number(limit) || 10
+  });
+
+  res.status(200).json({
+    success: true,
+    count: rides.length,
+    rides
+  });
+};
+
+// @desc    Find rides within a circular area using MongoDB $geoWithin operator
+// @route   GET /api/rides/within
+// @access  Private
+const getRidesWithinArea = async (req, res) => {
+  const { latitude, longitude, radiusKm, limit } = req.query;
+  const rides = await rideService.getRidesWithinArea({
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    radiusKm: Number(radiusKm) || 5,
+    limit: Number(limit) || 10
+  });
+
+  res.status(200).json({
+    success: true,
+    count: rides.length,
+    rides
+  });
+};
+
 // @desc    Get single ride by ID with driver info
 // @route   GET /api/rides/:id
 // @access  Private
@@ -595,6 +633,8 @@ module.exports = {
   leaveRide,
   removePassenger,
   searchRides,
+  getNearbyRides,
+  getRidesWithinArea,
   getRideById,
   createBooking,
   saveRide,
