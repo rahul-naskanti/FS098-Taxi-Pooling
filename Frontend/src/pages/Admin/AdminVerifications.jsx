@@ -93,21 +93,31 @@ function AdminVerifications() {
   };
 
   const getDocUrl = (docName, driver) => {
-    if (driver?.uploadedDocuments?.[docName]) {
-      const docPath = driver.uploadedDocuments[docName];
-      if (docPath.startsWith('/uploads') || docPath.startsWith('uploads')) {
-        const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-        const serverUrl = isLocal ? 'http://localhost:5001' : 'https://fs098-taxi-pooling.onrender.com';
-        const cleanPath = docPath.startsWith('/') ? docPath : `/${docPath}`;
-        return `${serverUrl}${cleanPath}`;
+    if (!driver) return null;
+    const docs = driver.uploadedDocuments || {};
+
+    let docObj = docs[docName];
+    if (!docObj && (docName === 'licenseImage' || docName === 'licenseDocument')) {
+      docObj = docs.licenseDocument || docs.licenseImage;
+    }
+
+    if (docObj) {
+      if (typeof docObj === 'object' && docObj.secureUrl) {
+        return docObj.secureUrl;
       }
-      return docPath;
+      if (typeof docObj === 'string' && docObj.trim() !== '') {
+        if (docObj.startsWith('/uploads') || docObj.startsWith('uploads')) {
+          const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+          const serverUrl = isLocal ? 'http://localhost:5001' : 'https://fs098-taxi-pooling.onrender.com';
+          const cleanPath = docObj.startsWith('/') ? docObj : `/${docObj}`;
+          return `${serverUrl}${cleanPath}`;
+        }
+        return docObj;
+      }
     }
-    if (docName === 'rcDocument' && driver && 'uploadedDocuments' in driver) {
-      return null;
-    }
-    return MOCK_DOCS[docName];
+    return null;
   };
+
 
   const isPdfDoc = (docName, driver) => {
     const url = getDocUrl(docName, driver);
@@ -277,7 +287,12 @@ function AdminVerifications() {
                   {/* License Image */}
                   <div className="bg-[#070a13] border border-slate-900 rounded-2xl overflow-hidden group relative">
                     <div className="h-28 bg-slate-950 flex items-center justify-center overflow-hidden">
-                      {isPdfDoc('licenseImage', selectedDriver) ? (
+                      {!getDocUrl('licenseImage', selectedDriver) ? (
+                        <div className="flex flex-col items-center gap-1 text-slate-500">
+                          <FaRegFileAlt className="text-2xl text-slate-600 animate-pulse" />
+                          <span className="text-[10px] font-medium">Not Uploaded</span>
+                        </div>
+                      ) : isPdfDoc('licenseImage', selectedDriver) ? (
                         <div className="flex flex-col items-center gap-1.5 text-slate-400">
                           <FaRegFileAlt className="text-3xl text-red-400" />
                           <span className="text-[10px] font-medium">PDF Document</span>
@@ -292,13 +307,15 @@ function AdminVerifications() {
                     </div>
                     <div className="p-3 flex items-center justify-between border-t border-slate-900 bg-slate-950/40">
                       <span className="text-[10px] text-slate-400 font-bold">Driver License</span>
-                      <button 
-                        onClick={() => setSelectedDocUrl(getDocUrl('licenseImage', selectedDriver))}
-                        className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-400 text-xs border border-slate-800 cursor-pointer"
-                        title="View Document"
-                      >
-                        <FaEye />
-                      </button>
+                      {getDocUrl('licenseImage', selectedDriver) && (
+                        <button 
+                          onClick={() => setSelectedDocUrl(getDocUrl('licenseImage', selectedDriver))}
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-400 text-xs border border-slate-800 cursor-pointer"
+                          title="View Document"
+                        >
+                          <FaEye />
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -340,7 +357,12 @@ function AdminVerifications() {
                   {/* ID Proof */}
                   <div className="bg-[#070a13] border border-slate-900 rounded-2xl overflow-hidden group relative">
                     <div className="h-28 bg-slate-950 flex items-center justify-center overflow-hidden">
-                      {isPdfDoc('idProof', selectedDriver) ? (
+                      {!getDocUrl('idProof', selectedDriver) ? (
+                        <div className="flex flex-col items-center gap-1 text-slate-500">
+                          <FaRegFileAlt className="text-2xl text-slate-600 animate-pulse" />
+                          <span className="text-[10px] font-medium">Not Uploaded</span>
+                        </div>
+                      ) : isPdfDoc('idProof', selectedDriver) ? (
                         <div className="flex flex-col items-center gap-1.5 text-slate-400">
                           <FaRegFileAlt className="text-3xl text-red-400" />
                           <span className="text-[10px] font-medium">PDF Document</span>
@@ -355,15 +377,18 @@ function AdminVerifications() {
                     </div>
                     <div className="p-3 flex items-center justify-between border-t border-slate-900 bg-slate-950/40">
                       <span className="text-[10px] text-slate-400 font-bold">National ID Proof</span>
-                      <button 
-                        onClick={() => setSelectedDocUrl(getDocUrl('idProof', selectedDriver))}
-                        className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-400 text-xs border border-slate-800 cursor-pointer"
-                        title="View Document"
-                      >
-                        <FaEye />
-                      </button>
+                      {getDocUrl('idProof', selectedDriver) && (
+                        <button 
+                          onClick={() => setSelectedDocUrl(getDocUrl('idProof', selectedDriver))}
+                          className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-indigo-400 text-xs border border-slate-800 cursor-pointer"
+                          title="View Document"
+                        >
+                          <FaEye />
+                        </button>
+                      )}
                     </div>
                   </div>
+
                 </div>
               </div>
 

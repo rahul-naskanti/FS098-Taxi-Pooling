@@ -4,19 +4,21 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 
 const seedAdmin = async () => {
-  const mongoURI = process.env.MONGO_URI;
-  if (!mongoURI || mongoURI.trim() === '') {
-    console.error('❌ Error: MONGO_URI is missing. Set it in Backend/.env');
-    process.exit(1);
-  }
+  const mongoURI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/taxipooling';
 
   try {
-    await mongoose.connect(mongoURI);
-    console.log('📡 Connected to MongoDB for seeding...');
+    try {
+      await mongoose.connect(mongoURI, { serverSelectionTimeoutMS: 3000 });
+      console.log('📡 Connected to primary MongoDB for seeding...');
+    } catch (primaryErr) {
+      console.warn(`⚠️ Primary MongoDB connection failed (${primaryErr.message}). Falling back to local MongoDB...`);
+      await mongoose.connect('mongodb://127.0.0.1:27017/taxipooling', { serverSelectionTimeoutMS: 3000 });
+      console.log('📡 Connected to fallback local MongoDB for seeding...');
+    }
 
     const existingAdmin = await User.findOne({ email: 'admin@taxipool.com' });
     if (existingAdmin) {
-      console.warn('⚠️ Warning: Admin user (admin@taxipool.com) already exists. Skipping seeding.');
+      console.warn('⚠️ Warning: Admin user (admin@taxipool.com) already exists in database.');
       mongoose.connection.close();
       process.exit(0);
     }

@@ -72,10 +72,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Request Rate Limiting for API routes
+// Request Rate Limiting for API routes (Higher threshold in dev for testing)
+const isDevApp = process.env.NODE_ENV !== 'production';
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: isDevApp ? 10000 : 200,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -84,6 +85,7 @@ const limiter = rateLimit({
   }
 });
 app.use('/api', limiter);
+
 
 // GraphQL HTTP Endpoint Handler (Runs parallel to REST APIs)
 app.post('/graphql', protectOptional, async (req, res) => {
