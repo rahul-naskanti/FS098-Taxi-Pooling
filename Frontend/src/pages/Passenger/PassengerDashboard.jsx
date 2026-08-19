@@ -62,20 +62,39 @@ function PassengerDashboard() {
   const [isLoadingBookings, setIsLoadingBookings] = useState(false);
   const [isLoadingStats, setIsLoadingStats] = useState(false);
 
-  // History list
-  const historyList = [
-    { id: 1, driver: "Rahul S.", route: "Ameerpet → Hitech City", date: "May 20, 2026", fare: 45, status: "Completed", rating: 5 },
-    { id: 2, driver: "Sneha G.", route: "Madhapur → Ameerpet", date: "May 18, 2026", fare: 45, status: "Completed", rating: 5 },
-    { id: 3, driver: "Priya M.", route: "Secunderabad → Gachibowli", date: "May 15, 2026", fare: 75, status: "Completed", rating: 4 },
-    { id: 4, driver: "Ankit V.", route: "Kukatpally → Madhapur", date: "May 12, 2026", fare: 50, status: "Completed", rating: 5 },
-  ];
+  // History list dynamically populated from real database bookings
+  const historyList = upcomingRides.map(b => ({
+    id: b.id,
+    driver: b.driverName || 'Verified Driver',
+    route: `${b.pickup} → ${b.dropoff}`,
+    date: b.time || 'N/A',
+    fare: b.price || 0,
+    status: b.status || 'Completed',
+    rating: 5
+  }));
 
-  // Saved Routes
-  const [savedRoutes, setSavedRoutes] = useState([
-    { id: 1, name: "Office Commute", pickup: "Ameerpet", dropoff: "Hitech City", matches: 4 },
-    { id: 2, name: "Weekend Route", pickup: "Secunderabad", dropoff: "Gachibowli", matches: 2 },
-    { id: 3, name: "College Path", pickup: "Kukatpally", dropoff: "Madhapur", matches: 3 }
-  ]);
+
+  // Saved Routes State
+  const [savedRoutes, setSavedRoutes] = useState([]);
+
+  const fetchSavedRides = async () => {
+    try {
+      const data = await rideService.getSavedRides();
+      if (data.success && data.savedRides) {
+        const mappedSaved = data.savedRides.map((ride, idx) => ({
+          id: ride._id || idx,
+          name: `Saved Route #${idx + 1}`,
+          pickup: ride.pickupLocation,
+          dropoff: ride.dropLocation,
+          matches: 1
+        }));
+        setSavedRoutes(mappedSaved);
+      }
+    } catch (err) {
+      console.error('Error fetching saved rides:', err);
+    }
+  };
+
 
   const intervalRef = useRef(null);
 
@@ -190,9 +209,11 @@ function PassengerDashboard() {
     await Promise.all([
       fetchDashboardStats(),
       fetchAvailableRides(),
-      fetchBookings()
+      fetchBookings(),
+      fetchSavedRides()
     ]);
   };
+
 
   useEffect(() => {
     if (user) {

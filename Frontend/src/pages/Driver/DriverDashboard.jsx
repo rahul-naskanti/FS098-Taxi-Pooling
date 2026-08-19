@@ -187,13 +187,16 @@ function DriverDashboard() {
     }
   }, [user]);
 
-  // Past ride history
-  const historyList = [
-    { id: 1, route: "Ameerpet → Hitech City", date: "May 22, 2026", passengers: 3, earned: 135, status: "Completed" },
-    { id: 2, route: "Madhapur → Ameerpet", date: "May 20, 2026", passengers: 2, earned: 90, status: "Completed" },
-    { id: 3, route: "Ameerpet → Gachibowli", date: "May 18, 2026", passengers: 3, earned: 225, status: "Completed" },
-    { id: 4, route: "Secunderabad → Hitech City", date: "May 15, 2026", passengers: 4, earned: 300, status: "Completed" }
-  ];
+  // Past ride history dynamically populated from real driver rides in database
+  const historyList = activeRides.map(r => ({
+    id: r.id,
+    route: `${r.pickup} → ${r.dropoff}`,
+    date: `${r.date} (${r.time})`,
+    passengers: r.passengersCount || 0,
+    earned: (r.passengersCount || 0) * (r.price || 0),
+    status: r.status
+  }));
+
 
   // Helper to format current time e.g. "9:14 AM"
   const getFormattedTime = () => {

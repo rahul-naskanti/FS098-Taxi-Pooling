@@ -1,8 +1,8 @@
 import React from 'react';
-import { FaSearch } from 'react-icons/fa';
+import { FaSearch, FaBookmark } from 'react-icons/fa';
 
 function SavedRoutes({
-  savedRoutes,
+  savedRoutes = [],
   setSearchPickup,
   setSearchDropoff,
   setActiveTab
@@ -14,34 +14,48 @@ function SavedRoutes({
         <p className="text-xs text-slate-400">Manage shortcuts for your standard daily routes.</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {savedRoutes.map(route => (
-          <div key={route.id} className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-white font-display">{route.name}</h3>
-              <span className="text-[9px] font-extrabold px-2 py-0.5 bg-teal-500/10 text-teal-400 border border-teal-500/20 rounded">
-                {route.matches} pools active
-              </span>
-            </div>
+      {savedRoutes.length === 0 ? (
+        <div className="bg-[#0d1020] border border-slate-800 rounded-3xl p-12 text-center text-slate-400">
+          <FaBookmark className="w-10 h-10 mx-auto mb-3 text-slate-600 animate-pulse" />
+          <p className="text-sm font-bold text-white mb-1">No Saved Routes Found</p>
+          <p className="text-xs text-slate-500 mb-4">Bookmark ride pools during search to save quick shortcuts here.</p>
+          <button
+            onClick={() => setActiveTab('findRides')}
+            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-xs rounded-xl transition-all cursor-pointer"
+          >
+            Find Rides Now
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {savedRoutes.map(route => (
+            <div key={route.id} className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-white font-display">{route.name}</h3>
+                <span className="text-[9px] font-extrabold px-2 py-0.5 bg-teal-500/10 text-teal-400 border border-teal-500/20 rounded">
+                  {route.matches || 1} pools active
+                </span>
+              </div>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-855 space-y-1.5 text-xs">
-              <p className="text-slate-500">From: <span className="font-bold text-white">{route.pickup}</span></p>
-              <p className="text-slate-500">To: <span className="font-bold text-white">{route.dropoff}</span></p>
-            </div>
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-855 space-y-1.5 text-xs">
+                <p className="text-slate-500">From: <span className="font-bold text-white">{route.pickup}</span></p>
+                <p className="text-slate-500">To: <span className="font-bold text-white">{route.dropoff}</span></p>
+              </div>
 
-            <button
-              onClick={() => {
-                setSearchPickup(route.pickup);
-                setSearchDropoff(route.dropoff);
-                setActiveTab('findRides');
-              }}
-              className="w-full py-2 bg-slate-950 hover:bg-slate-900 border border-slate-855 hover:border-slate-800 text-[10px] font-bold text-slate-300 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-            >
-              <FaSearch className="text-[9px]" /> Scan Route Pools
-            </button>
-          </div>
-        ))}
-      </div>
+              <button
+                onClick={() => {
+                  setSearchPickup(route.pickup);
+                  setSearchDropoff(route.dropoff);
+                  setActiveTab('findRides');
+                }}
+                className="w-full py-2 bg-slate-950 hover:bg-slate-900 border border-slate-855 hover:border-slate-800 text-[10px] font-bold text-slate-300 rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <FaSearch className="text-[9px]" /> Scan Route Pools
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
