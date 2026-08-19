@@ -6,10 +6,11 @@ const { validate } = require('../middleware/validateMiddleware');
 const { registerSchema, loginSchema } = require('../validators/auth.schema');
 const redisRateLimiter = require('../middleware/rateLimiterMiddleware');
 
-// Specific rate limit for sensitive Auth endpoints (5 attempts per 15 minutes per IP)
+// Specific rate limit for sensitive Auth endpoints (Higher limit in dev for testing)
+const isDev = process.env.NODE_ENV !== 'production';
 const authLimiter = redisRateLimiter({
   windowSec: 900,
-  maxRequests: 5,
+  maxRequests: isDev ? 100 : 15,
   keyPrefix: 'rate_limit:auth'
 });
 
