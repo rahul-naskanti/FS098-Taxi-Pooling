@@ -1,42 +1,32 @@
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
+const AppError = require('../utils/AppError');
 
-// Ensure uploads directory exists
-const uploadDir = path.join(__dirname, '../../uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
+// Memory storage engine keeps uploaded binary buffers in RAM (req.file.buffer) for Cloudinary stream processing
+const storage = multer.memoryStorage();
 
-// Configure Storage Engine
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, uploadDir);
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-// Configure File Filters
+// Strict MIME type & extension validation
 const fileFilter = (req, file, cb) => {
+  const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
   const allowedExtensions = ['.jpeg', '.jpg', '.png', '.pdf'];
+
   const ext = path.extname(file.originalname).toLowerCase();
-  
-  if (allowedExtensions.includes(ext)) {
+  const mimeTypeValid = allowedMimeTypes.includes(file.mimetype);
+  const extValid = allowedExtensions.includes(ext);
+
+  if (mimeTypeValid && extValid) {
     cb(null, true);
   } else {
-    cb(new Error('Only JPG, JPEG, PNG, and PDF files are allowed'), false);
+    cb(new AppError('Invalid file format. Only JPG, JPEG, PNG, and PDF files are allowed.', 400), false);
   }
 };
 
-// Initialize Multer
+// Initialize Multer upload handler
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5 MB limit
+    fileSize: 5 * 1024 * 1024 // Enforce 5 MB maximum file size limit
   }
 });
 

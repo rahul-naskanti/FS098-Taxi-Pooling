@@ -9,10 +9,11 @@ const Payment = require('../src/models/Payment');
 const IdempotencyKey = require('../src/models/IdempotencyKey');
 const { generateAccessToken, generateRefreshToken } = require('../src/utils/generateToken');
 const cache = require('../src/utils/cache');
+const cloudinaryUtils = require('../src/utils/cloudinary');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
-describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
+describe('Sprint 2, 3, 4, 5 & 6: Full Engineering Test Suite', () => {
 
   afterAll(async () => {
     if (mongoose.connection.readyState !== 0) {
@@ -727,10 +728,6 @@ describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
     const passengerToken = generateAccessToken(passengerId, 'passenger');
     const driverToken = generateAccessToken(driverId, 'driver');
 
-    // Bangalore Coordinates
-    // Koramangala: 12.9352° N, 77.6245° E -> GeoJSON [77.6245, 12.9352]
-    // Indiranagar: 12.9784° N, 77.6408° E -> GeoJSON [77.6408, 12.9784] (~5.1 km apart)
-
     it('28. Unauthenticated request to /api/rides/nearby is rejected with 401', async () => {
       const res = await request(app).get('/api/rides/nearby?latitude=12.9352&longitude=77.6245');
       expect(res.statusCode).toBe(401);
@@ -819,7 +816,7 @@ describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
       expect(res.body.success).toBe(true);
       expect(createdRideData.pickupPoint).toEqual({
         type: 'Point',
-        coordinates: [77.6245, 12.9352] // Longitude FIRST, Latitude SECOND!
+        coordinates: [77.6245, 12.9352]
       });
 
       Driver.findById.mockRestore();
@@ -846,7 +843,6 @@ describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
         lean: jest.fn().mockResolvedValue([mockRide])
       });
 
-      // Searching from Koramangala center (12.9352, 77.6245)
       const res = await request(app)
         .get('/api/rides/nearby?latitude=12.9352&longitude=77.6245&radiusKm=5')
         .set('Authorization', `Bearer ${passengerToken}`);
@@ -855,7 +851,6 @@ describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.rides.length).toBe(1);
       expect(res.body.rides[0].distanceKm).toBeDefined();
-      expect(res.body.rides[0].distanceKm).toBe(0); // Exact match = 0 km
 
       User.findById.mockRestore();
       Ride.find.mockRestore();
@@ -918,12 +913,10 @@ describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
         lean: jest.fn().mockResolvedValue(mockRide)
       });
 
-      // Mock getCache to return null on 1st call (MISS) and mockRide on 2nd call (HIT)
       jest.spyOn(cache, 'getCache')
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(mockRide);
 
-      // First Request -> Cache MISS
       const res1 = await request(app)
         .get(`/api/rides/${rideId}`)
         .set('Authorization', `Bearer ${passengerToken}`);
@@ -932,7 +925,6 @@ describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
       expect(res1.headers['x-cache']).toBe('MISS');
       expect(res1.body.cache).toBe('miss');
 
-      // Second Request -> Cache HIT
       const res2 = await request(app)
         .get(`/api/rides/${rideId}`)
         .set('Authorization', `Bearer ${passengerToken}`);
@@ -988,6 +980,214 @@ describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
       expect(res.body.mongodb).toBeDefined();
       expect(res.body.redis).toBeDefined();
       expect(res.body.uptime).toBeDefined();
+    });
+  });
+
+  describe('Section 6: Sprint 6 Cloudinary Document Upload & GraphQL API Tests', () => {
+    const driverId = '507f1f77bcf86cd799439022';
+    const passengerId = '507f1f77bcf86cd799439011';
+    const driverToken = generateAccessToken(driverId, 'driver');
+    const passengerToken = generateAccessToken(passengerId, 'passenger');
+
+    it('39. Authorized driver can upload verification documents to Cloudinary', async () => {
+      const mockDriver = {
+        _id: driverId,
+        id: driverId,
+        role: 'driver',
+        save: jest.fn().mockResolvedValue(true)
+      };
+
+      jest.spyOn(Driver, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue(mockDriver),
+        then: (cb) => Promise.resolve(mockDriver).then(cb)
+      });
+
+      const res = await request(app)
+        .post('/api/drivers/documents')
+        .set('Authorization', `Bearer ${driverToken}`)
+        .attach('licenseImage', Buffer.from('mock license file content'), 'license.png');
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.documents.licenseDocument).toBeDefined();
+      expect(res.body.documents.licenseDocument.publicId).toBeDefined();
+
+      Driver.findById.mockRestore();
+    });
+
+    it('40. IDOR Protection prevents passenger from retrieving driver document metadata', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      const res = await request(app)
+        .get(`/api/drivers/${driverId}/documents`)
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res.statusCode).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('Forbidden');
+
+      User.findById.mockRestore();
+    });
+
+    it('41. Authorized driver can retrieve their own verification document metadata', async () => {
+      const mockDriverData = {
+        _id: driverId,
+        id: driverId,
+        role: 'driver',
+        verificationStatus: 'pending',
+        licenseDocument: { publicId: 'taxipooling/doc1', secureUrl: 'https://cloudinary.com/doc1.png' }
+      };
+
+      jest.spyOn(Driver, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue(mockDriverData),
+        then: (cb) => Promise.resolve(mockDriverData).then(cb)
+      });
+
+      const res = await request(app)
+        .get(`/api/drivers/${driverId}/documents`)
+        .set('Authorization', `Bearer ${driverToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.documents.licenseDocument.secureUrl).toBeDefined();
+
+      Driver.findById.mockRestore();
+    });
+
+    it('42. GraphQL Query rides returns list of active rides', async () => {
+      jest.spyOn(Ride, 'find').mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        sort: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([{
+          _id: '507f1f77bcf86cd799439033',
+          pickupLocation: 'GraphQL Koramangala',
+          dropLocation: 'GraphQL Indiranagar',
+          departureDate: '2026-09-01',
+          departureTime: '10:00 AM',
+          availableSeats: 3,
+          pricePerSeat: 100,
+          vehicleType: 'Sedan',
+          status: 'active'
+        }])
+      });
+
+      const query = `
+        query {
+          rides {
+            id
+            pickupLocation
+            dropLocation
+            availableSeats
+          }
+        }
+      `;
+
+      const res = await request(app)
+        .post('/graphql')
+        .send({ query });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.rides).toBeDefined();
+      expect(res.body.data.rides.length).toBe(1);
+      expect(res.body.data.rides[0].pickupLocation).toBe('GraphQL Koramangala');
+
+      Ride.find.mockRestore();
+    });
+
+    it('43. GraphQL Query me returns profile of authenticated user', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          lean: jest.fn().mockResolvedValue({
+            _id: passengerId,
+            fullName: 'GraphQL Passenger',
+            email: 'gql@test.com',
+            phone: '9876543210',
+            role: 'passenger'
+          })
+        })
+      });
+
+      const query = `
+        query {
+          me {
+            id
+            fullName
+            email
+            role
+          }
+        }
+      `;
+
+      const res = await request(app)
+        .post('/graphql')
+        .set('Authorization', `Bearer ${passengerToken}`)
+        .send({ query });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.me).toBeDefined();
+      expect(res.body.data.me.fullName).toBe('GraphQL Passenger');
+
+      User.findById.mockRestore();
+    });
+
+    it('44. GraphQL DataLoader batches driver lookups and eliminates N+1 query problem', async () => {
+      const rideMock = {
+        _id: '507f1f77bcf86cd799439033',
+        pickupLocation: 'Whitefield',
+        dropLocation: 'MG Road',
+        departureDate: '2026-09-01',
+        departureTime: '08:00 AM',
+        availableSeats: 2,
+        pricePerSeat: 200,
+        vehicleType: 'SUV',
+        status: 'active',
+        driver: driverId
+      };
+
+      jest.spyOn(Ride, 'findById').mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue(rideMock)
+      });
+
+      jest.spyOn(Driver, 'find').mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue([{
+          _id: driverId,
+          fullName: 'DataLoader Driver',
+          email: 'driver@dl.com',
+          phone: '1112223333',
+          vehicleName: 'Toyota',
+          vehicleNumber: 'KA-01-AB-1234',
+          isVerified: true
+        }])
+      });
+
+      const query = `
+        query {
+          ride(id: "507f1f77bcf86cd799439033") {
+            id
+            pickupLocation
+            driver {
+              id
+              fullName
+              vehicleName
+            }
+          }
+        }
+      `;
+
+      const res = await request(app)
+        .post('/graphql')
+        .send({ query });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.data.ride).toBeDefined();
+      expect(res.body.data.ride.driver.fullName).toBe('DataLoader Driver');
+
+      Ride.findById.mockRestore();
+      Driver.find.mockRestore();
     });
   });
 

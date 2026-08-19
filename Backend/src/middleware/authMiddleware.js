@@ -18,10 +18,8 @@ const protect = async (req, res, next) => {
       if (decoded.role === 'driver') {
         req.user = await Driver.findById(decoded.id).select('-password');
       } else {
-        // Query User collection (passengers and admins)
         req.user = await User.findById(decoded.id).select('-password');
         if (!req.user && !decoded.role) {
-          // Fallback check in Driver collection for legacy tokens
           req.user = await Driver.findById(decoded.id).select('-password');
         }
       }
@@ -49,6 +47,31 @@ const protect = async (req, res, next) => {
   }
 };
 
+const protectOptional = async (req, res, next) => {
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer')
+  ) {
+    try {
+      const token = req.headers.authorization.split(' ')[1];
+      const secret = process.env.JWT_SECRET || 'supersecretjwtkeyfordev123!';
+      const decoded = jwt.verify(token, secret);
+
+      if (decoded.role === 'driver') {
+        req.user = await Driver.findById(decoded.id).select('-password');
+      } else {
+        req.user = await User.findById(decoded.id).select('-password');
+        if (!req.user && !decoded.role) {
+          req.user = await Driver.findById(decoded.id).select('-password');
+        }
+      }
+    } catch (error) {
+      req.user = null;
+    }
+  }
+  next();
+};
+
 const authorizeRoles = (...roles) => {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {
@@ -61,7 +84,6 @@ const authorizeRoles = (...roles) => {
   };
 };
 
-// Enforces driver verification check before performing driver actions (e.g. creating ride pools)
 const requireVerifiedDriver = (req, res, next) => {
   if (!req.user || req.user.role !== 'driver') {
     throw new AppError('Access denied: Driver privileges required', 403);
@@ -75,7 +97,6 @@ const requireVerifiedDriver = (req, res, next) => {
   next();
 };
 
-// Prevents IDOR vulnerabilities by asserting resource owner or admin access
 const authorizeOwnerOrAdmin = (paramName = 'id') => {
   return (req, res, next) => {
     const resourceUserId = req.params[paramName];
@@ -97,6 +118,7 @@ const authorizeOwnerOrAdmin = (paramName = 'id') => {
 
 module.exports = {
   protect,
+  protectOptional,
   authorizeRoles,
   requireVerifiedDriver,
   authorizeOwnerOrAdmin

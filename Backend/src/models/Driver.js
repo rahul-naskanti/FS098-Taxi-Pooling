@@ -1,6 +1,16 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+const documentMetadataSchema = new mongoose.Schema(
+  {
+    publicId: { type: String, default: '' },
+    secureUrl: { type: String, default: '' },
+    resourceType: { type: String, default: 'image' },
+    uploadedAt: { type: Date, default: Date.now }
+  },
+  { _id: false }
+);
+
 const driverSchema = new mongoose.Schema(
   {
     fullName: {
@@ -70,6 +80,14 @@ const driverSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true
+    },
+    licenseDocument: {
+      type: documentMetadataSchema,
+      default: () => ({})
+    },
+    rcDocument: {
+      type: documentMetadataSchema,
+      default: () => ({})
     },
     uploadedDocuments: {
       licenseImage: { type: String, default: '' },
