@@ -5,7 +5,6 @@ let isRedisConnected = false;
 
 const initRedis = async () => {
   const redisUrl = process.env.REDIS_URL || 'redis://127.0.0.1:6379';
-  console.log(`📡 Connecting to Redis at ${redisUrl}...`);
   
   try {
     redisClient = redis.createClient({ 
@@ -13,7 +12,6 @@ const initRedis = async () => {
       socket: {
         reconnectStrategy: (retries) => {
           if (retries > 3) {
-            console.warn('⚠️ Redis reconnection attempts exhausted. Operating without Redis cache.');
             return false;
           }
           return Math.min(retries * 1000, 5000);
@@ -22,25 +20,17 @@ const initRedis = async () => {
     });
     
     redisClient.on('error', (err) => {
-      // Log only on first few retries, otherwise it's silenced after reconnection limits
-      if (isRedisConnected || !redisClient || redisClient.isOpen) {
-        console.warn(`⚠️ Redis Client Error: ${err.message}`);
-      }
       isRedisConnected = false;
     });
 
-    redisClient.on('connect', () => {
-      console.log('📡 Redis client connecting...');
-    });
+    redisClient.on('connect', () => {});
 
     redisClient.on('ready', () => {
-      console.log('📡 Redis Client Connected & Ready!');
       isRedisConnected = true;
     });
 
     await redisClient.connect();
   } catch (error) {
-    console.warn(`⚠️ Failed to connect to Redis: ${error.message}`);
     redisClient = null;
     isRedisConnected = false;
   }
@@ -52,7 +42,6 @@ const getCache = async (key) => {
     const value = await redisClient.get(key);
     return value ? JSON.parse(value) : null;
   } catch (err) {
-    console.error(`⚠️ Redis getCache error for key ${key}:`, err.message);
     return null;
   }
 };
@@ -65,7 +54,6 @@ const setCache = async (key, value, ttlSeconds = 300) => {
     });
     return true;
   } catch (err) {
-    console.error(`⚠️ Redis setCache error for key ${key}:`, err.message);
     return false;
   }
 };
@@ -76,7 +64,6 @@ const delCache = async (key) => {
     await redisClient.del(key);
     return true;
   } catch (err) {
-    console.error(`⚠️ Redis delCache error for key ${key}:`, err.message);
     return false;
   }
 };
@@ -98,12 +85,12 @@ const clearCachePattern = async (pattern) => {
     } while (cursor !== 0);
     return true;
   } catch (err) {
-    console.error(`⚠️ Redis clearCachePattern error for pattern ${pattern}:`, err.message);
     return false;
   }
 };
 
 const isConnected = () => isRedisConnected;
+const getClient = () => (isRedisConnected ? redisClient : null);
 
 module.exports = {
   initRedis,
@@ -111,5 +98,6 @@ module.exports = {
   setCache,
   delCache,
   clearCachePattern,
-  isConnected
+  isConnected,
+  getClient
 };

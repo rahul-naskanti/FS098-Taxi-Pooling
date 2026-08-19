@@ -5,7 +5,7 @@ const Booking = require('../models/Booking');
 const Payment = require('../models/Payment');
 const Notification = require('../models/Notification');
 const AppError = require('../utils/AppError');
-const { getCache, setCache, delCache } = require('../utils/cache');
+const cache = require('../utils/cache');
 
 // Helper to compute Haversine distance in kilometers
 function calculateHaversineDistanceKm(lat1, lon1, lat2, lon2) {
@@ -69,22 +69,22 @@ class RideService {
       passengers: []
     });
 
-    // Invalidate relevant caches
-    await delCache('active_rides_list');
-    await delCache('admin_dashboard_stats');
-    await delCache(`driver_dashboard_stats:${driverId}`);
+    // Invalidate relevant caches after ride creation
+    await cache.delCache('active_rides_list');
+    await cache.delCache('admin_dashboard_stats');
+    await cache.delCache(`driver_dashboard_stats:${driverId}`);
 
     return ride;
   }
 
   /**
-   * Fetch all active rides (with Redis caching)
+   * Fetch all active rides (Cache-Aside pattern)
    */
   async getAllActiveRides() {
     const cacheKey = 'active_rides_list';
-    const cached = await getCache(cacheKey);
+    const cached = await cache.getCache(cacheKey);
     if (cached) {
-      return cached.rides;
+      return { rides: cached.rides, _fromCache: true };
     }
 
     const rides = await Ride.find({ status: 'active' })
@@ -92,8 +92,30 @@ class RideService {
       .sort({ createdAt: -1 })
       .lean();
 
-    await setCache(cacheKey, { success: true, rides }, 300);
-    return rides;
+    await cache.setCache(cacheKey, { success: true, rides }, 300);
+    return { rides, _fromCache: false };
+  }
+
+  /**
+   * Fetch single ride details by ID (Cache-Aside pattern)
+   */
+  async getRideById(rideId) {
+    const cacheKey = `ride:${rideId}`;
+    const cached = await cache.getCache(cacheKey);
+    if (cached) {
+      return { ride: cached, _fromCache: true };
+    }
+
+    const ride = await Ride.findById(rideId)
+      .populate('driver', 'fullName email phone vehicleName vehicleNumber verificationStatus isVerified')
+      .lean();
+
+    if (!ride) {
+      throw new AppError('Ride pool not found', 404);
+    }
+
+    await cache.setCache(cacheKey, ride, 300); // 5 minutes TTL
+    return { ride, _fromCache: false };
   }
 
   /**
@@ -169,7 +191,7 @@ class RideService {
   }
 
   /**
-   * Transactional & Atomic ride pool join logic with Mongoose Session support
+   * Transactional & Atomic ride pool join logic with Mongoose Session & Post-Commit Cache Invalidation
    */
   async joinRide(rideId, passengerId) {
     const existingRide = await Ride.findById(rideId).lean();
@@ -270,7 +292,7 @@ class RideService {
       await executeBookingSteps(null);
     }
 
-    // Side Effects OUTSIDE transaction boundary (Notifications & Cache Invalidation)
+    // Side Effects OUTSIDE transaction boundary (Notifications & Cache Invalidation AFTER commit)
     if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(passengerId)) {
       await Notification.create({
         user: passengerId,
@@ -291,10 +313,12 @@ class RideService {
       }).catch((err) => console.error('Notification creation error:', err));
     }
 
-    await delCache('active_rides_list');
-    await delCache('admin_dashboard_stats');
-    await delCache(`passenger_dashboard_stats:${passengerId}`);
-    await delCache(`driver_dashboard_stats:${existingRide.driver}`);
+    // POST-COMMIT CACHE INVALIDATION
+    await cache.delCache(`ride:${rideId}`);
+    await cache.delCache('active_rides_list');
+    await cache.delCache('admin_dashboard_stats');
+    await cache.delCache(`passenger_dashboard_stats:${passengerId}`);
+    await cache.delCache(`driver_dashboard_stats:${existingRide.driver}`);
 
     return { ride: updatedRide, booking, payment };
   }
@@ -338,21 +362,6 @@ class RideService {
         vehicleType: ride.vehicleType || ''
       };
     });
-  }
-
-  /**
-   * Get single ride by ID
-   */
-  async getRideById(rideId) {
-    const ride = await Ride.findById(rideId)
-      .populate('driver', 'fullName email phone vehicleName vehicleNumber verificationStatus isVerified')
-      .lean();
-
-    if (!ride) {
-      throw new AppError('Ride pool not found', 404);
-    }
-
-    return ride;
   }
 }
 

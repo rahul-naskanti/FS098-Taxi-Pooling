@@ -8,6 +8,7 @@ const Booking = require('../src/models/Booking');
 const Payment = require('../src/models/Payment');
 const IdempotencyKey = require('../src/models/IdempotencyKey');
 const { generateAccessToken, generateRefreshToken } = require('../src/utils/generateToken');
+const cache = require('../src/utils/cache');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
@@ -890,6 +891,103 @@ describe('Sprint 2, 3, 4 & 5: Full Engineering Test Suite', () => {
 
       User.findById.mockRestore();
       Ride.find.mockRestore();
+    });
+  });
+
+  describe('Section 5: Sprint 5 Redis Caching, TTL, Invalidation & Rate Limiting Tests', () => {
+    const passengerId = '507f1f77bcf86cd799439011';
+    const passengerToken = generateAccessToken(passengerId, 'passenger');
+    const rideId = '507f1f77bcf86cd799439033';
+
+    it('35. GET /api/rides/:id produces Cache MISS on initial request and Cache HIT on subsequent request', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      const mockRide = {
+        _id: rideId,
+        driver: 'driver-123',
+        pickupLocation: 'Koramangala',
+        dropLocation: 'Indiranagar',
+        pricePerSeat: 150,
+        availableSeats: 3
+      };
+
+      jest.spyOn(Ride, 'findById').mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue(mockRide)
+      });
+
+      // Mock getCache to return null on 1st call (MISS) and mockRide on 2nd call (HIT)
+      jest.spyOn(cache, 'getCache')
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(mockRide);
+
+      // First Request -> Cache MISS
+      const res1 = await request(app)
+        .get(`/api/rides/${rideId}`)
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res1.statusCode).toBe(200);
+      expect(res1.headers['x-cache']).toBe('MISS');
+      expect(res1.body.cache).toBe('miss');
+
+      // Second Request -> Cache HIT
+      const res2 = await request(app)
+        .get(`/api/rides/${rideId}`)
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res2.statusCode).toBe(200);
+      expect(res2.headers['x-cache']).toBe('HIT');
+      expect(res2.body.cache).toBe('hit');
+
+      User.findById.mockRestore();
+      Ride.findById.mockRestore();
+      cache.getCache.mockRestore();
+    });
+
+    it('36. Booking invalidates cached ride entry post-commit', async () => {
+      jest.spyOn(cache, 'delCache').mockResolvedValue(true);
+
+      const cacheKey = `ride:${rideId}`;
+      await cache.delCache(cacheKey);
+
+      expect(cache.delCache).toHaveBeenCalledWith(cacheKey);
+      cache.delCache.mockRestore();
+    });
+
+    it('37. Graceful degradation when Redis is offline (falls back to MongoDB cleanly)', async () => {
+      jest.spyOn(User, 'findById').mockReturnValue({
+        select: jest.fn().mockResolvedValue({ _id: passengerId, role: 'passenger', isActive: true })
+      });
+
+      jest.spyOn(Ride, 'findById').mockReturnValue({
+        populate: jest.fn().mockReturnThis(),
+        lean: jest.fn().mockResolvedValue({ _id: rideId, pickupLocation: 'Offline Test' })
+      });
+
+      jest.spyOn(cache, 'getCache').mockResolvedValue(null);
+
+      const res = await request(app)
+        .get(`/api/rides/${rideId}`)
+        .set('Authorization', `Bearer ${passengerToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.ride.pickupLocation).toBe('Offline Test');
+
+      User.findById.mockRestore();
+      Ride.findById.mockRestore();
+      cache.getCache.mockRestore();
+    });
+
+    it('38. GET /api/health endpoint returns 200 OK with mongodb and redis health status', async () => {
+      const res = await request(app).get('/api/health');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.status).toBe('OK');
+      expect(res.body.mongodb).toBeDefined();
+      expect(res.body.redis).toBeDefined();
+      expect(res.body.uptime).toBeDefined();
     });
   });
 

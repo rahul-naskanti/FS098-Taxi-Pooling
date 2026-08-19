@@ -47,7 +47,7 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 app.get('/api/health', (req, res) => {
   const mongooseState = mongoose.connection.readyState;
   const mongoStatus = mongooseState === 1 ? 'connected' : 'disconnected';
-  
+
   const cache = require('./utils/cache');
   const redisStatus = cache.isConnected() ? 'connected' : 'disconnected';
 

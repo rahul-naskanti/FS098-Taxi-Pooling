@@ -4,8 +4,16 @@ const { registerUser, loginUser, refreshSession, logoutUser } = require('../cont
 const upload = require('../middleware/uploadMiddleware');
 const { validate } = require('../middleware/validateMiddleware');
 const { registerSchema, loginSchema } = require('../validators/auth.schema');
+const redisRateLimiter = require('../middleware/rateLimiterMiddleware');
 
-// Wrapper middleware to execute multer only for multipart/form-data requests (e.g. driver signup with file uploads)
+// Specific rate limit for sensitive Auth endpoints (5 attempts per 15 minutes per IP)
+const authLimiter = redisRateLimiter({
+  windowSec: 900,
+  maxRequests: 5,
+  keyPrefix: 'rate_limit:auth'
+});
+
+// Wrapper middleware to execute multer only for multipart/form-data requests
 const handleUpload = (req, res, next) => {
   const contentType = req.headers['content-type'] || '';
   if (contentType.includes('multipart/form-data')) {
@@ -21,12 +29,12 @@ const handleUpload = (req, res, next) => {
 // @route   POST /api/auth/register
 // @desc    Register a new user
 // @access  Public
-router.post('/register', handleUpload, validate(registerSchema, 'body'), registerUser);
+router.post('/register', authLimiter, handleUpload, validate(registerSchema, 'body'), registerUser);
 
 // @route   POST /api/auth/login
 // @desc    Authenticate user & get token
 // @access  Public
-router.post('/login', validate(loginSchema, 'body'), loginUser);
+router.post('/login', authLimiter, validate(loginSchema, 'body'), loginUser);
 
 // @route   POST /api/auth/refresh
 // @desc    Refresh session & get new access token (Token Rotation)

@@ -19,18 +19,20 @@ const createRide = async (req, res) => {
   });
 };
 
-// @desc    Get all active ride pools
+// @desc    Get all active ride pools (Cache-Aside)
 // @route   GET /api/rides
 // @access  Private
 const getAllRides = async (req, res) => {
-  const rides = await rideService.getAllActiveRides();
+  const { rides, _fromCache } = await rideService.getAllActiveRides();
+  res.setHeader('X-Cache', _fromCache ? 'HIT' : 'MISS');
   res.status(200).json({
     success: true,
+    cache: _fromCache ? 'hit' : 'miss',
     rides
   });
 };
 
-// @desc    Join an active ride pool (Atomic)
+// @desc    Join an active ride pool (Atomic & Transactional)
 // @route   POST /api/rides/:id/join
 // @access  Private (Passenger only)
 const joinRide = async (req, res) => {
@@ -114,6 +116,7 @@ const cancelRide = async (req, res) => {
     type: 'cancel'
   });
 
+  await delCache(`ride:${req.params.id}`);
   await delCache('active_rides_list');
   await delCache('admin_dashboard_stats');
   await delCache(`driver_dashboard_stats:${req.user.id}`);
@@ -190,6 +193,7 @@ const leaveRide = async (req, res) => {
     type: 'cancel'
   });
 
+  await delCache(`ride:${rideId}`);
   await delCache('active_rides_list');
   await delCache('admin_dashboard_stats');
   await delCache(`passenger_dashboard_stats:${req.user.id}`);
@@ -269,6 +273,7 @@ const removePassenger = async (req, res) => {
     type: 'cancel'
   });
 
+  await delCache(`ride:${rideId}`);
   await delCache('active_rides_list');
   await delCache('admin_dashboard_stats');
   await delCache(`passenger_dashboard_stats:${passengerId}`);
@@ -452,13 +457,15 @@ const getRidesWithinArea = async (req, res) => {
   });
 };
 
-// @desc    Get single ride by ID with driver info
+// @desc    Get single ride by ID with driver info (Cache-Aside)
 // @route   GET /api/rides/:id
 // @access  Private
 const getRideById = async (req, res) => {
-  const ride = await rideService.getRideById(req.params.id);
+  const { ride, _fromCache } = await rideService.getRideById(req.params.id);
+  res.setHeader('X-Cache', _fromCache ? 'HIT' : 'MISS');
   res.status(200).json({
     success: true,
+    cache: _fromCache ? 'hit' : 'miss',
     ride
   });
 };
@@ -538,6 +545,7 @@ const createBooking = async (req, res) => {
     type: 'join'
   });
 
+  await delCache(`ride:${rideId}`);
   await delCache('active_rides_list');
   await delCache('admin_dashboard_stats');
   await delCache(`passenger_dashboard_stats:${req.user.id}`);
