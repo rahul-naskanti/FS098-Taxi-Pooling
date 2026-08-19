@@ -42,13 +42,14 @@ const bookingSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    bufferCommands: false
   }
 );
 
-bookingSchema.index({ passenger: 1 });
+// Database-level compound unique index preventing duplicate active bookings for the same passenger and ride
+bookingSchema.index({ passenger: 1, ride: 1 }, { unique: true });
 bookingSchema.index({ driver: 1 });
-bookingSchema.index({ ride: 1 });
 
 const Booking = mongoose.model('Booking', bookingSchema);
 

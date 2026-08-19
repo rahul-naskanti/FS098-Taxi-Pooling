@@ -43,7 +43,8 @@ const paymentSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    bufferCommands: false
   }
 );
 

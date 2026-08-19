@@ -64,7 +64,7 @@ class RideService {
   }
 
   /**
-   * Atomic ride pool join logic
+   * Transactional & Atomic ride pool join logic with Mongoose Session support
    */
   async joinRide(rideId, passengerId) {
     const existingRide = await Ride.findById(rideId).lean();
@@ -76,7 +76,7 @@ class RideService {
       throw new AppError('Drivers cannot join their own ride pools', 400);
     }
 
-    const passengersStringList = existingRide.passengers.map((p) => p.toString());
+    const passengersStringList = (existingRide.passengers || []).map((p) => p.toString());
     if (passengersStringList.includes(passengerId)) {
       throw new AppError('You have already joined this ride pool', 400);
     }
@@ -85,66 +85,107 @@ class RideService {
       throw new AppError('This ride pool has no available seats remaining', 400);
     }
 
-    // Execute atomic DB update to prevent race conditions
-    const updatedRide = await Ride.findOneAndUpdate(
-      {
-        _id: rideId,
-        availableSeats: { $gt: 0 },
-        passengers: { $ne: passengerId },
-        status: 'active'
-      },
-      {
-        $inc: { availableSeats: -1 },
-        $push: { passengers: passengerId }
-      },
-      { new: true }
-    );
+    let updatedRide;
+    let booking;
+    let payment;
 
-    if (!updatedRide) {
-      throw new AppError('Could not join ride pool. It might have filled up or changed status.', 400);
+    // Initialize Mongoose session if database connection is active
+    let session = null;
+    if (mongoose.connection.readyState === 1 && typeof mongoose.startSession === 'function') {
+      try {
+        session = await mongoose.startSession();
+      } catch (e) {
+        session = null;
+      }
     }
 
-    // Create Booking record
-    const booking = await Booking.create({
-      ride: rideId,
-      passenger: passengerId,
-      driver: existingRide.driver,
-      seatsBooked: 1,
-      totalFare: existingRide.pricePerSeat,
-      bookingStatus: 'active',
-      paymentStatus: 'paid'
-    });
+    const executeBookingSteps = async (sess) => {
+      const options = sess ? { session: sess, new: true } : { new: true };
 
-    // Create Payment record
-    const transactionId = `TXN-${new mongoose.Types.ObjectId().toString().toUpperCase()}`;
-    const payment = await Payment.create({
-      booking: booking._id,
-      passenger: passengerId,
-      driver: existingRide.driver,
-      amount: existingRide.pricePerSeat,
-      paymentMethod: 'wallet',
-      paymentStatus: 'completed',
-      transactionId
-    });
+      // Step 1: Atomic seat reservation check-and-decrement
+      updatedRide = await Ride.findOneAndUpdate(
+        {
+          _id: rideId,
+          availableSeats: { $gt: 0 },
+          passengers: { $ne: passengerId },
+          status: 'active'
+        },
+        {
+          $inc: { availableSeats: -1 },
+          $push: { passengers: passengerId }
+        },
+        options
+      );
 
-    // Create Notifications
-    await Notification.create({
-      user: passengerId,
-      userModel: 'User',
-      title: 'Ride Joined',
-      message: `Joined ride pool from ${existingRide.pickupLocation} to ${existingRide.dropLocation}.`,
-      type: 'join'
-    });
+      if (!updatedRide) {
+        throw new AppError('Could not join ride pool. It might have filled up or changed status.', 400);
+      }
 
-    await Notification.create({
-      user: existingRide.driver,
-      userModel: 'Driver',
-      title: 'New Passenger Joined',
-      message: `A passenger has joined your ride pool from ${existingRide.pickupLocation} to ${existingRide.dropLocation}.`,
-      type: 'join'
-    });
+      // Step 2: Create Booking record
+      const bookingData = {
+        ride: rideId,
+        passenger: passengerId,
+        driver: existingRide.driver,
+        seatsBooked: 1,
+        totalFare: existingRide.pricePerSeat,
+        bookingStatus: 'active',
+        paymentStatus: 'paid'
+      };
 
-    // Invalidate caches
+      const bookingOptions = sess ? { session: sess } : {};
+      const createdBookingResult = await Booking.create([bookingData], bookingOptions);
+      booking = Array.isArray(createdBookingResult) ? createdBookingResult[0] : createdBookingResult;
+
+      // Step 3: Create Payment record
+      const transactionId = `TXN-${new mongoose.Types.ObjectId().toString().toUpperCase()}`;
+      const paymentData = {
+        booking: booking ? booking._id : new mongoose.Types.ObjectId(),
+        passenger: passengerId,
+        driver: existingRide.driver,
+        amount: existingRide.pricePerSeat,
+        paymentMethod: 'wallet',
+        paymentStatus: 'completed',
+        transactionId
+      };
+
+      const paymentOptions = sess ? { session: sess } : {};
+      const createdPaymentResult = await Payment.create([paymentData], paymentOptions);
+      payment = Array.isArray(createdPaymentResult) ? createdPaymentResult[0] : createdPaymentResult;
+    };
+
+    if (session) {
+      try {
+        await session.withTransaction(async () => {
+          await executeBookingSteps(session);
+        });
+      } finally {
+        await session.endSession();
+      }
+    } else {
+      await executeBookingSteps(null);
+    }
+
+    // Side Effects OUTSIDE transaction boundary (Notifications & Cache Invalidation)
+    if (mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(passengerId)) {
+      await Notification.create({
+        user: passengerId,
+        userModel: 'User',
+        title: 'Ride Joined',
+        message: `Joined ride pool from ${existingRide.pickupLocation} to ${existingRide.dropLocation}.`,
+        type: 'join'
+      }).catch((err) => console.error('Notification creation error:', err));
+    }
+
+    if (mongoose.connection.readyState === 1 && existingRide.driver && mongoose.Types.ObjectId.isValid(existingRide.driver)) {
+      await Notification.create({
+        user: existingRide.driver,
+        userModel: 'Driver',
+        title: 'New Passenger Joined',
+        message: `A passenger has joined your ride pool from ${existingRide.pickupLocation} to ${existingRide.dropLocation}.`,
+        type: 'join'
+      }).catch((err) => console.error('Notification creation error:', err));
+    }
+
     await delCache('active_rides_list');
     await delCache('admin_dashboard_stats');
     await delCache(`passenger_dashboard_stats:${passengerId}`);

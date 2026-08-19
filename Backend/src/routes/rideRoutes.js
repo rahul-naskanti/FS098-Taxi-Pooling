@@ -15,6 +15,7 @@ const {
 } = require('../controllers/rideController');
 const { protect, authorizeRoles, requireVerifiedDriver } = require('../middleware/authMiddleware');
 const { validate } = require('../middleware/validateMiddleware');
+const { checkIdempotency } = require('../middleware/idempotencyMiddleware');
 const { createRideSchema, searchRideSchema } = require('../validators/ride.schema');
 const { objectIdParamSchema } = require('../validators/common.schema');
 
@@ -63,9 +64,16 @@ router.get('/', protect, getAllRides);
 router.post('/:id/remove-passenger', protect, authorizeRoles('driver'), validate(objectIdParamSchema, 'params'), removePassenger);
 
 // @route   POST /api/rides/:id/join
-// @desc    Join an active ride pool (Atomic)
+// @desc    Join an active ride pool (Transactional & Idempotent)
 // @access  Private (Passenger only)
-router.post('/:id/join', protect, authorizeRoles('passenger'), validate(objectIdParamSchema, 'params'), joinRide);
+router.post(
+  '/:id/join',
+  protect,
+  authorizeRoles('passenger'),
+  validate(objectIdParamSchema, 'params'),
+  checkIdempotency(false),
+  joinRide
+);
 
 // @route   POST /api/rides/:id/leave
 // @desc    Leave a joined ride pool
